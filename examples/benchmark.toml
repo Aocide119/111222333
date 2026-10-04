@@ -1,0 +1,24 @@
+# Copy and adjust this file for an OpenAI-compatible endpoint.
+# Keep the API key in EVOG_API_KEY; it is never stored in this file.
+# Replace these placeholders with the endpoint and model approved for your deployment.
+base_url = "https://your-provider.example/v1"
+model = "your-model"
+reasoning_effort = "none"
+request_timeout = 120
+max_turns = 60
+max_tool_calls = 20
+max_tool_rounds = 20
+max_parallel_tool_calls = 3
+max_tool_output_chars = 12000
+question_timeout_seconds = 500
+call_timeout_seconds = 60
+call_attempts = 3
+benchmark_concurrency = 4
+analysis_concurrency = 4
+max_output_tokens = 8192
+reflection_timeout_seconds = 60
+reflection_max_output_tokens = 8192
+analysis_max_runs = 30
+analysis_turns = 15
+max_context_chars = 800000
+context_trim_ratio = 0.8

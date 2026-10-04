@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.env
+.env.*
+!.env.example
+dist/
+build/
+*.egg-info/
+.evog/
+workspaces/
+*.sqlite3*
+.DS_Store
+# Existing illustration artifacts are unrelated to the release.
+pelican-riding-bicycle.*
