@@ -20,12 +20,45 @@ EvoGroup 是一个在保持基础模型不变的条件下，根据交互反馈�
 
 EvoGroup 面向共享、多用户上下文运行。原始消息始终是证据层，学习记忆限定在授权群组内，工作记忆按题目隔离。初始 Harness 提供五个有界工具：`list_files`、`read_file`、`grep_search`、`write_file` 和 `create_file`。
 
-整体流程包含四个阶段：
+## 🔄 自演化循环
 
-1. **交互：** 在明确选择的群组上回答问题，并记录回答、置信度、引用和工具轨迹。
-2. **筛选：** 以 0.5 为置信度阈值组合外部正确性，得到 CC、CW、UC、UW 四类经验。
-3. **分析：** 使用自适应渐进披露（APD）和归桶诊断检查相关证据，识别重复问题。
-4. **演化：** 在 Representation、Operation、Policy 和 Intervention 四类接口中生成有证据关联的声明式修订，并对 checkpoint 进行版本化、激活、验证和回滚。
+论文将 EvoGroup 定义为四阶段的 self-evolution loop：interaction、trajectory selection、analysis 和 harness revision。基础模型保持不变，Harness 从 `$H_0$` 开始逐步产生并评测新的 checkpoint。
+
+### 1. 🧭 Interaction
+
+Group Agent 使用当前 Harness `$H_t$` 在共享群组上下文上回答问题。交互记录问题、观察、推理或工具操作、最终回答和主观置信度。初始 cold start 只包含五个工具——`list_files`、`read_file`、`grep_search`、`write_file` 和 `create_file`——技能库与记忆均为空。
+
+当置信度不高于论文设定的 0.5 阈值时，Group Agent 会在外部监督结果揭示前生成 self-reflection。该反思只作为诊断证据，不会改变正式正确性标签。
+
+### 2. 🎯 Trajectory Selection
+
+官方评测器提供回答正确性信号。EvoGroup 将它与置信度结合，按论文定义把轨迹分为四组：
+
+| 组别 | 定义 | 演化用途 |
+| --- | --- | --- |
+| CC | confident-correct | 常规成功行为 |
+| CW | confident-wrong | 未识别的推理失败或回答偏差 |
+| UC | unconfident-correct | 需要额外支持的脆弱成功 |
+| UW | unconfident-wrong | 带有反思证据的已识别失败 |
+
+进入分析集合的是 CW、UC 和 UW。CC 作为成功参考保留，不作为优先诊断对象。筛选结果会在分析开始前写入本轮归档。
+
+### 3. 🔬 Analysis
+
+论文将这一阶段称为 **Trajectory Analysis from Details to Patterns**。Analysis Agent 首先使用 **Adaptive Progressive Disclosure（APD）**：先查看紧凑的结构视图，定位可能出问题的阶段，再按需打开对应的观察、操作、工具结果或通信记录。
+
+每条入选轨迹都会生成 detailed rationale 和 condensed rationale，保留失败位置、归因原因和可执行含义。随后，**Bucketed Analysis** 按推断出的查询语义组织 condensed rationale，先分析桶内模式，再比较跨桶模式，形成供修订使用的 high-level findings。
+
+### 4. 🛠️ Harness Revision
+
+论文将这一阶段称为 **Multi-Interface Harness Revision**。Evolve Agent 根据 condensed rationale 和 high-level findings，在四类接口上提出变更：
+
+- **Representation：** 信息如何保存、关联和呈现；
+- **Operation：** 可执行动作及其实现；
+- **Intervention：** 执行边界上的检查、转换和约束；
+- **Policy：** 控制选择什么、何时执行以及执行顺序的规则。
+
+候选 `$H_{t+1}$` 在下一轮执行并评测前都只是提案。每项变更都带有证据、预期修复和回归风险清单。最终从已评测 checkpoint 中选择 `$H_{*}$`；没有候选通过验证时，保留当前 Harness。
 
 ## 安装
 
@@ -165,12 +198,33 @@ Benchmark 适配器从数据目录读取题目 episode 和源语料。产品运�
 ## 仓库结构
 
 ~~~text
-src/evog/          CLI、运行时、记忆、分析、演化与模型传输
-src/evog/prompts/  模型提示模板
-examples/          演示输入及产品／研究配置模板
-assets/            论文图片
-tests/             离线回归测试
-dist/              wheel 与源码压缩包
+EvoGroup/
+├── src/evog/
+│   ├── cli.py                  # evog 命令行入口
+│   ├── app.py                  # 命令调度
+│   ├── runtime.py              # 群交互与轨迹创建
+│   ├── memory.py               # 群组长期记忆与题目工作记忆
+│   ├── tools.py                # 有界证据与导航工具
+│   ├── analysis.py             # 筛选、APD、诊断与综合
+│   ├── evolution.py            # 修订计划与 checkpoint 激活
+│   ├── harness.py              # 四类声明式修订接口
+│   ├── benchmarks.py           # 产品 Benchmark 运行与循环
+│   ├── campaign.py             # 论文演化 campaign
+│   ├── frozen_evaluation.py    # 留出集 checkpoint 评测
+│   ├── benchmark_*.py          # 数据加载、评测、指标、划分与恢复
+│   ├── providers.py            # OpenAI 兼容模型传输
+│   ├── store.py                # 消息、轨迹、反馈与修订保存
+│   └── prompts/                # 群交互、分析、综合与演化提示
+├── examples/
+│   ├── messages.jsonl          # 最小群消息输入
+│   ├── benchmark.toml          # 产品配置模板
+│   ├── paper.toml              # 研究配置模板
+│   └── run_demo.sh             # 离线演示启动脚本
+├── assets/                     # 框架图与消融图
+├── tests/                      # 离线回归测试
+├── dist/                       # wheel 与源码压缩包
+├── pyproject.toml              # 包元数据与 CLI 入口
+└── uv.lock                    # 固定的 Python 依赖
 ~~~
 
 ~~~bash

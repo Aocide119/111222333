@@ -20,12 +20,45 @@ EvoGroup is a self-evolving memory harness that improves evidence-grounded group
 
 EvoGroup operates over shared, multi-user context. Source messages remain the evidence layer, learned memory is scoped to authorized groups, and working memory is isolated per question. The initial harness exposes five bounded tools: `list_files`, `read_file`, `grep_search`, `write_file`, and `create_file`.
 
-The method has four stages:
+## 🔄 Self-Evolution Loop
 
-1. **Interact:** answer a question over explicitly selected groups and record the answer, confidence, citations, and tool trace.
-2. **Select:** combine external correctness with a 0.5 confidence threshold to identify CC, CW, UC, and UW experience cases.
-3. **Analyze:** use Adaptive Progressive Disclosure (APD) and bucketed diagnosis to inspect relevant evidence and identify recurring problems.
-4. **Evolve:** emit evidence-linked, declarative revisions across Representation, Operation, Policy, and Intervention; version, activate, validate, and roll back each checkpoint.
+The paper defines EvoGroup as a four-stage self-evolution loop: interaction, trajectory selection, analysis, and harness revision. The base model stays fixed while the Harness changes from `$H_0$` through evaluated checkpoints.
+
+### 1. 🧭 Interaction
+
+The Group Agent uses the current Harness `$H_t$` to answer a query over shared group context. The interaction records the query, observations, reasoning or tool-use actions, final answer, and subjective confidence. The initial cold start contains five tools—`list_files`, `read_file`, `grep_search`, `write_file`, and `create_file`—with empty skills and memory.
+
+When confidence is at or below the paper's threshold of 0.5, the Group Agent produces a self-reflection before external supervision is revealed. This reflection is diagnostic evidence; it does not change the official correctness label.
+
+### 2. 🎯 Trajectory Selection
+
+The official evaluator supplies the answer-correctness signal. EvoGroup combines it with confidence-guided experience selection and partitions trajectories into four paper-defined groups:
+
+| Group | Definition | Use in evolution |
+| --- | --- | --- |
+| CC | confident-correct | routine successful behavior |
+| CW | confident-wrong | undetected reasoning failure or answer bias |
+| UC | unconfident-correct | fragile success that needs support |
+| UW | unconfident-wrong | recognized failure with reflection evidence |
+
+The selected set contains CW, UC, and UW trajectories. CC remains a success reference and is not prioritized for diagnosis. The selection result is stored with the round archive before analysis begins.
+
+### 3. 🔬 Analysis
+
+The paper calls this stage **Trajectory Analysis from Details to Patterns**. The Analysis Agent first applies **Adaptive Progressive Disclosure (APD)**: it sees a compact structural view, locates a potentially problematic stage, and opens the corresponding observations, actions, tool results, or communication records only when needed.
+
+Each selected trajectory receives a detailed rationale and a condensed rationale that retain the failure location, attributed cause, and actionable implication. **Bucketed Analysis** then groups condensed rationales by inferred query semantics, analyzes patterns within each bucket, and compares patterns across buckets to produce high-level findings for revision.
+
+### 4. 🛠️ Harness Revision
+
+The paper calls this stage **Multi-Interface Harness Revision**. The Evolve Agent converts condensed rationales and high-level findings into changes at four interfaces:
+
+- **Representation:** how information is stored, associated, or presented;
+- **Operation:** executable actions and their implementations;
+- **Intervention:** checks, transformations, or constraints at execution boundaries;
+- **Policy:** rules controlling what to select, when to execute it, and in what order.
+
+A candidate `$H_{t+1}$` remains a proposal until it is executed and evaluated in the next round. Each change carries a manifest with its evidence, predicted repair, and regression risks. The best evaluated checkpoint is selected as `$H_{*}$`; if no candidate passes validation, the current Harness is retained.
 
 ## Installation
 
@@ -165,12 +198,33 @@ Across five matched analysis iterations, APD reduces analysis time by 42.5% and 
 ## Repository Structure
 
 ~~~text
-src/evog/          CLI, runtime, memory, analysis, evolution, and model transport
-src/evog/prompts/  model-facing prompt templates
-examples/          demo input and product/research configuration templates
-assets/            paper figures
-tests/             offline regression tests
-dist/              built wheel and source archive
+EvoGroup/
+├── src/evog/
+│   ├── cli.py                  # evog command-line entry point
+│   ├── app.py                  # command orchestration
+│   ├── runtime.py              # group interaction and trace creation
+│   ├── memory.py               # scoped long-term and working memory
+│   ├── tools.py                # bounded evidence and navigation tools
+│   ├── analysis.py             # selection, APD, diagnosis, and synthesis
+│   ├── evolution.py            # revision plans and checkpoint activation
+│   ├── harness.py              # four declarative revision interfaces
+│   ├── benchmarks.py           # product benchmark runs and cycles
+│   ├── campaign.py             # paper evolution campaigns
+│   ├── frozen_evaluation.py    # held-out checkpoint evaluation
+│   ├── benchmark_*.py          # loading, judging, metrics, splits, recovery
+│   ├── providers.py            # OpenAI-compatible model transport
+│   ├── store.py                # messages, traces, feedback, and revisions
+│   └── prompts/                # group, analysis, synthesis, and evolution prompts
+├── examples/
+│   ├── messages.jsonl          # minimal group-message input
+│   ├── benchmark.toml          # product configuration template
+│   ├── paper.toml              # research configuration template
+│   └── run_demo.sh             # offline demo launcher
+├── assets/                     # framework and ablation figures
+├── tests/                      # offline regression tests
+├── dist/                       # built wheel and source archive
+├── pyproject.toml              # package metadata and CLI entry point
+└── uv.lock                    # locked Python dependencies
 ~~~
 
 ~~~bash
