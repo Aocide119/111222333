@@ -142,20 +142,6 @@ uv run evog --config examples/paper.toml \
   --output results/evermem-campaign.json
 ~~~
 
-Reported EverMemBench pass@1 (%):
-
-| Method | GPT-5.5 | DeepSeek-V4-Flash | GLM-5.1 |
-| --- | ---: | ---: | ---: |
-| Mem0 | 56.50 | 43.71 | 52.42 |
-| MemOS | 49.25 | 39.17 | 47.04 |
-| A-MEM | 61.71 | 47.00 | 58.75 |
-| MemRL | 61.54 | 55.92 | 57.33 |
-| Codex | **85.67** | 82.63 | 77.88 |
-| Claude Code | 84.58 | 85.75 | 76.46 |
-| EvoGroup `$H_0$` | 68.33 | 71.07 | 68.27 |
-| EvoGroup `$H_{*}$` | 84.52 | **89.58** | **83.63** |
-| **`$H_0$` → `$H_{*}$`** | **+16.19 pp** | **+18.51 pp** | **+15.36 pp** |
-
 ## Self-Evolution
 
 The CLI exposes the paper workflow as a sequence of deterministic state transitions:
@@ -175,23 +161,6 @@ uv run evog apply PLAN_ID
 The benchmark adapters load question episodes and source corpora from the supplied dataset root. Product runs use `benchmark run` or `benchmark cycle`; paper campaigns use `benchmark campaign`. Results are written as JSON checkpoints with the selected episode IDs, deployment settings, per-question outcomes, and aggregate metrics.
 
 The evaluation layer keeps benchmark memory isolated per question and validates candidate checkpoints before activation. Standard answers are used by the evaluator and are not included in agent context.
-
-## Ablation Study
-
-The paper compares the initial harness with individual evolved components. The released figure records the component-level ablation used in the paper.
-
-<p align="center">
-  <img src="assets/harness-ablation.png" alt="EvoGroup harness component ablation" width="850">
-</p>
-
-## Transfer Experiment
-
-The evolved checkpoint is transferred to GroupMemBench without further evolution or tuning. Reported aggregates are:
-
-| Backbone | `$H_0$` | Frozen `$H_{*}$` | Change |
-| --- | ---: | ---: | ---: |
-| GPT-5.5 | 61.88% | 63.89% | +2.01 pp |
-| DeepSeek-V4-Flash | 74.09% | 71.14% | −2.95 pp |
 
 ## Efficiency Analysis
 
