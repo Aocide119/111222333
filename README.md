@@ -99,8 +99,7 @@ activation and can recover a previously active, comparable best version after a 
 
 ## Results
 
-The tables and figures report results from the **EvoGroup paper**. Evaluation settings and
-result sources are documented in [figure and table sources](assets/README.md).
+The tables and figures report results from the **EvoGroup paper**. 
 
 ### EverMemBench
 
