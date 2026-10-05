@@ -29,7 +29,7 @@ basic tools and empty learned memory and skills**, it selects informative trajec
 inspects evidence on demand, discovers recurring patterns, and revises the harness for the
 next round of interactions.
 
-**Paper highlight:** in the paper's DeepSeek-V4-Flash setting, five harness updates raise
+**Highlight:** in the paper's DeepSeek-V4-Flash setting, five harness updates raise
 EverMemBench pass@1 from **71.07% to 89.58% (+18.51 percentage points)**. The same study reports
 lower analysis cost with Adaptive Progressive Disclosure and evaluates frozen transfer to
 GroupMemBench. Full results and their scope appear [below](#results).
@@ -93,10 +93,9 @@ evidence, expected behavior, regression risk, and validation check.
 
 A revised $H_{t+1}$ is versioned and used in subsequent interactions. Source records, model
 settings, runtime budgets, and core grounding checks remain fixed. The current release uses
-declarative revisions with atomic activation, stale-plan checks, and rollback.
-Per-change manifests retain expected fixes, risks and observed results. Benchmark cycles validate
-paired trials before activation and can recover a previously active, comparable best version
-after a rejected regression.
+declarative revisions with atomic activation, stale-plan checks, and rollback. Per-change manifests
+retain expected fixes, risks and observed results. Benchmark cycles validate paired trials before
+activation and can recover a previously active, comparable best version after a rejected regression.
 
 ## Results
 
@@ -125,8 +124,8 @@ plus 1,680 separate held-out questions.
 
 ### Frozen Transfer to GroupMemBench
 
-The evolved harness is applied without further evolution or tuning. The paper reports
-745 questions and the following aggregates:
+The evolved harness is applied without further evolution or tuning. The paper reports 745 questions
+and the following aggregates:
 
 | Backbone | $H_0$ | Frozen $H_{*}$ | Change |
 | --- | ---: | ---: | ---: |
@@ -212,9 +211,8 @@ uv run evog groups
 uv run evog ask 'What is the latest release schedule?' --group product
 ```
 
-The provider must support Chat Completions and function tools. Supply UTF-8 JSONL messages
-with `group_id`, `message_id`, `sender`, timezone-aware `timestamp`, and `text`.
-`reply_to` and string-valued `metadata` are optional. See [example messages](examples/messages.jsonl).
+The import format requires `group_id`, `message_id`, `sender`, timezone-aware `timestamp`, and
+`text`. `reply_to` and string-valued `metadata` are optional. See [example messages](examples/messages.jsonl).
 Duplicate imports are idempotent; conflicting content under the same source ID rejects the import.
 Repeat `--group` for a query over multiple authorized groups.
 

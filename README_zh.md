@@ -19,17 +19,15 @@
 
 ## 概述
 
-**EvoGroup（EvoG）** 是面向共享上下文群体智能体的自演化记忆 Harness。
-它帮助群助手在长期多人对话中保留发言归属、讨论过程、协作关系与信息的时序变化。
+**EvoGroup（EvoG）** 是面向共享上下文群体智能体的自演化记忆 Harness。它帮助群助手在长期多人对话中保留发言归属、讨论过程、协作关系与信息的时序变化。
 
 EvoG 将模型外围的记忆组织、工具和决策策略作为演化对象，在保持基础模型固定的条件下，
 从交互经验中发现问题并修订 Harness。系统从**五个基础工具、空的学习记忆和技能库**出发，
 筛选有信息价值的轨迹、按需检查证据、归纳共性问题，再将修订后的 Harness 用于下一轮交互。
 
-**论文亮点：**在 DeepSeek-V4-Flash 设置下，经过五次 Harness 更新，EverMemBench 的
-pass@1 从 **71.07% 提升至 89.58%，增加 18.51 个百分点**。论文同时分析了按需轨迹披露
-对分析成本的影响，并评估冻结后的 Harness 在 GroupMemBench 上的迁移表现。
-具体结果及其适用范围见[实验结果](#实验结果)。
+**亮点：**在 DeepSeek-V4-Flash 设置下，经过五次 Harness 更新，EverMemBench 的 pass@1 从
+**71.07% 提升至 89.58%，增加 18.51 个百分点**。论文同时分析了按需轨迹披露对分析成本的影响，
+并评估冻结后的 Harness 在 GroupMemBench 上的迁移表现。具体结果及其适用范围见[实验结果](#实验结果)。
 
 ## 方法
 
@@ -149,6 +147,7 @@ evog --help
 ```
 
 Windows PowerShell 使用 `.venv\Scripts\Activate.ps1` 激活环境。
+
 激活后，将后续命令中的 `uv run evog` 替换为 `evog`。
 
 </details>
@@ -189,9 +188,10 @@ uv run evog groups
 uv run evog ask '最新的发布计划是什么？' --group product
 ```
 
-模型服务需要支持 Chat Completions 和函数工具调用。导入格式为 UTF-8 JSONL，必填字段为
-`group_id`、`message_id`、`sender`、带时区的 `timestamp` 和 `text`，可选字段为 `reply_to`
-和字符串值的 `metadata`。参见[示例消息](examples/messages.jsonl)。重复导入相同记录不会产生副本；同一源 ID 的内容冲突会拒绝整个导入。跨群查询可重复指定 `--group`，所选群需要获得访问授权。
+导入格式必填字段为 `group_id`、`message_id`、`sender`、带时区的 `timestamp` 和 `text`，
+可选字段为 `reply_to` 和字符串值的 `metadata`。参见[示例消息](examples/messages.jsonl)。
+重复导入相同记录不会产生副本；同一源 ID 的内容冲突会拒绝整个导入。跨群查询可重复指定
+`--group`，所选群需要获得访问授权。
 
 ### 分析与修订
 
