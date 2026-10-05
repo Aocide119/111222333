@@ -42,8 +42,6 @@ EvoGroup 是一个面向共享、多用户上下文的记忆 Harness。系统保
 
 ## 论文结果
 
-以下数值来自 EvoGroup 论文，是论文报告的聚合结果，不是当前仓库重新运行得到的结果。
-
 ### EverMemBench
 
 Pass@1（%）；$H_0$ 为初始 Harness，$H_{*}$ 为选出的演化 checkpoint。
@@ -98,9 +96,41 @@ uv run evog --help
 uv run evog --workspace /tmp/evog-demo demo
 ~~~
 
+## 论文 Benchmark 适配
+
+仓库不包含 Benchmark 数据。适配器直接读取 `--data-root` 指定目录中的数据：
+
+- EverMemBench 必须包含 `dataset/`。
+- GroupMemBench 必须包含 `data/final/` 和 `questions/`。
+
+指定数据目录和题目筛选条件即可运行适配器：
+
+~~~
+uv run evog benchmark run evermembench \
+  --data-root /path/to/EverMemBench --topic 01 --limit 2 \
+  --output results/evermem.json
+
+uv run evog benchmark run groupmembench \
+  --data-root /path/to/GroupMemBench \
+  --domain Finance --question-type multi_hop --limit 2 \
+  --output results/groupmem.json
+~~~
+
+`examples/benchmark.toml` 是产品配置模板；`examples/paper.toml` 是研究配置模板，端点和密钥通过环境变量提供。
+
+## 仓库结构
+
+~~~
+src/evog/          CLI、运行时、记忆、分析、演化与模型传输
+src/evog/prompts/  模型提示模板
+examples/          演示输入及产品／研究配置模板
+assets/            论文图片
+tests/             离线回归测试
+~~~
+
 ### 运行群消息
 
-在 shell 中设置 OpenAI 兼容端点和模型。API Key 从 <code>EVOG_API_KEY</code> 读取，不会写入仓库。
+在 shell 中设置 OpenAI 兼容端点和模型。API Key 从 `EVOG_API_KEY` 读取，不会写入仓库。
 
 ~~~
 export EVOG_BASE_URL=https://your-provider.example/v1
@@ -126,53 +156,6 @@ uv run evog apply PLAN_ID
 ~~~
 
 各 ID 由前一条命令输出。<code>revisions</code> 列出 checkpoint，<code>rollback REVISION_ID</code> 恢复指定 checkpoint。
-
-## 论文 Benchmark 适配
-
-仓库不包含 Benchmark 数据。EverMemBench 数据目录必须包含 <code>dataset/</code>；GroupMemBench 数据目录必须包含 <code>data/final/</code> 和 <code>questions/</code>。
-
-列出一个确定性的 EverMemBench 小样本：
-
-~~~
-uv run evog benchmark list evermembench \
-  --data-root /path/to/EverMemBench --topic 01 --limit 2
-~~~
-
-对 GroupMemBench 的 Finance/multi_hop 子集运行产品循环：
-
-~~~
-uv run evog benchmark cycle groupmembench \
-  --data-root /path/to/GroupMemBench \
-  --domain Finance --question-type multi_hop --limit 2 \
-  --output results.json
-~~~
-
-复现论文规模时，先生成固定的 720/1,680 划分，再运行六轮演化：
-
-~~~
-uv run evog benchmark split evermembench \
-  --data-root /path/to/EverMemBench --split-seed 0 \
-  --output splits/evermem
-
-uv run evog --config examples/paper.toml \
-  --workspace .evog-campaign-0 benchmark campaign evermembench \
-  --data-root /path/to/EverMemBench \
-  --manifest splits/evermem/manifest.json \
-  --evaluation-rounds 6 --seed 0 \
-  --output results/campaign-0.json
-~~~
-
-<code>examples/benchmark.toml</code> 是产品配置模板；<code>examples/paper.toml</code> 是研究配置模板，端点和密钥通过环境变量提供。
-
-## 仓库结构
-
-~~~
-src/evog/     CLI、运行时、记忆、分析、演化与模型传输
-src/evog/prompts/  模型提示模板
-examples/     演示输入及产品／研究配置模板
-assets/       论文图片
-tests/        离线回归测试
-~~~
 
 ## 验证
 

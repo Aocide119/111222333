@@ -42,8 +42,6 @@ The release provides:
 
 ## Paper results
 
-The following values are reported in the EvoGroup paper. They are the paper's aggregate results, not a rerun performed by this repository snapshot.
-
 ### EverMemBench
 
 Pass@1 (%); $H_0$ is the initial harness and $H_{*}$ is the selected evolved checkpoint.
@@ -98,9 +96,41 @@ The demo uses a deterministic fixture provider and makes no network requests. It
 uv run evog --workspace /tmp/evog-demo demo
 ~~~
 
+## Paper benchmark adapters
+
+Benchmark files are not bundled. The adapter reads them directly from the path passed to `--data-root`:
+
+- EverMemBench requires `dataset/`.
+- GroupMemBench requires `data/final/` and `questions/`.
+
+Run an adapter with the dataset checkout and the required slice selectors:
+
+~~~
+uv run evog benchmark run evermembench \
+  --data-root /path/to/EverMemBench --topic 01 --limit 2 \
+  --output results/evermem.json
+
+uv run evog benchmark run groupmembench \
+  --data-root /path/to/GroupMemBench \
+  --domain Finance --question-type multi_hop --limit 2 \
+  --output results/groupmem.json
+~~~
+
+`examples/benchmark.toml` is the product configuration template. `examples/paper.toml` is the research configuration template; provider endpoints and keys are supplied through environment variables.
+
+## Repository layout
+
+~~~
+src/evog/          CLI, runtime, memory, analysis, evolution, and model transport
+src/evog/prompts/  model-facing prompt templates
+examples/          demo input and product/research configuration templates
+assets/            paper figures
+tests/             offline regression tests
+~~~
+
 ### Run on group messages
 
-Set an OpenAI-compatible endpoint and model in the shell. The API key is read from <code>EVOG_API_KEY</code> and is not written to the repository.
+Set an OpenAI-compatible endpoint and model in the shell. The API key is read from `EVOG_API_KEY` and is not written to the repository.
 
 ~~~
 export EVOG_BASE_URL=https://your-provider.example/v1
@@ -126,53 +156,6 @@ uv run evog apply PLAN_ID
 ~~~
 
 The identifiers are emitted by the preceding commands. <code>revisions</code> lists checkpoints and <code>rollback REVISION_ID</code> restores a previous checkpoint.
-
-## Paper benchmark adapters
-
-Benchmark data is not included in this repository. The EverMemBench checkout must contain <code>dataset/</code>; the GroupMemBench checkout must contain <code>data/final/</code> and <code>questions/</code>.
-
-List a deterministic EverMemBench sample:
-
-~~~
-uv run evog benchmark list evermembench \
-  --data-root /path/to/EverMemBench --topic 01 --limit 2
-~~~
-
-Run the product cycle on a GroupMemBench slice:
-
-~~~
-uv run evog benchmark cycle groupmembench \
-  --data-root /path/to/GroupMemBench \
-  --domain Finance --question-type multi_hop --limit 2 \
-  --output results.json
-~~~
-
-For the paper cohort, create the fixed 720/1,680 split and run the six-round evolution campaign:
-
-~~~
-uv run evog benchmark split evermembench \
-  --data-root /path/to/EverMemBench --split-seed 0 \
-  --output splits/evermem
-
-uv run evog --config examples/paper.toml \
-  --workspace .evog-campaign-0 benchmark campaign evermembench \
-  --data-root /path/to/EverMemBench \
-  --manifest splits/evermem/manifest.json \
-  --evaluation-rounds 6 --seed 0 \
-  --output results/campaign-0.json
-~~~
-
-<code>examples/benchmark.toml</code> contains the product profile. <code>examples/paper.toml</code> contains the research profile; provider endpoints and keys are supplied through environment variables.
-
-## Repository layout
-
-~~~
-src/evog/     CLI, runtime, memory, analysis, evolution, and model transport
-src/evog/prompts/  model-facing prompt templates
-examples/     demo input and product/research configuration templates
-assets/       paper figures
-tests/        offline regression tests
-~~~
 
 ## Verification
 
