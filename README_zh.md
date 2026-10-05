@@ -140,19 +140,6 @@ uv run evog --config examples/paper.toml \
   --output results/evermem-campaign.json
 ~~~
 
-论文报告的 EverMemBench pass@1（%）：
-
-| 方法 | GPT-5.5 | DeepSeek-V4-Flash | GLM-5.1 |
-| --- | ---: | ---: | ---: |
-| Mem0 | 56.50 | 43.71 | 52.42 |
-| MemOS | 49.25 | 39.17 | 47.04 |
-| A-MEM | 61.71 | 47.00 | 58.75 |
-| MemRL | 61.54 | 55.92 | 57.33 |
-| Codex | **85.67** | 82.63 | 77.88 |
-| Claude Code | 84.58 | 85.75 | 76.46 |
-| EvoGroup `$H_0$` | 68.33 | 71.07 | 68.27 |
-| EvoGroup `$H_{*}$` | 84.52 | **89.58** | **83.63** |
-| **`$H_0$` → `$H_{*}$`** | **+16.19 pp** | **+18.51 pp** | **+15.36 pp** |
 
 ## 自演化
 
@@ -173,27 +160,6 @@ uv run evog apply PLAN_ID
 Benchmark 适配器从数据目录读取题目 episode 和源语料。产品运行使用 `benchmark run` 或 `benchmark cycle`，论文 campaign 使用 `benchmark campaign`。结果以 JSON checkpoint 保存，包含题目 ID、部署配置、逐题结果和聚合指标。
 
 评测层按题目隔离 Benchmark 记忆，并在激活前验证候选 checkpoint。标准答案只供评测器使用，不会进入智能体上下文。
-
-## 消融实验
-
-论文比较初始 Harness 与单个演化组件。仓库中的图片对应论文使用的组件级消融结果。
-
-<p align="center">
-  <img src="assets/harness-ablation.png" alt="EvoGroup Harness 组件消融" width="850">
-</p>
-
-## 迁移实验
-
-演化 checkpoint 在没有继续演化或调参的条件下迁移到 GroupMemBench。论文报告的聚合结果如下：
-
-| 模型 | `$H_0$` | 冻结后的 `$H_{*}$` | 增量 |
-| --- | ---: | ---: | ---: |
-| GPT-5.5 | 61.88% | 63.89% | +2.01 pp |
-| DeepSeek-V4-Flash | 74.09% | 71.14% | −2.95 pp |
-
-## 效率分析
-
-在五轮匹配分析中，APD 相比完整轨迹分析平均减少 42.5% 的分析时间和 41.5% 的 token 使用量。
 
 ## 仓库结构
 
