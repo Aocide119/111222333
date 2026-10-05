@@ -6,8 +6,6 @@
 
 EvoGroup is a self-evolving memory harness that improves evidence-grounded group-agent behavior from interaction feedback while keeping the base model fixed.
 
-[Paper](https://anonymous.4open.science/r/37883-8DC0/) · [Code](.) · [Models](#data-preparation) · [Dataset](#data-preparation) · [中文](README_zh.md)
-
 <img src="assets/evog-framework.png" alt="EvoGroup framework" width="1000">
 
 </div>

@@ -6,8 +6,6 @@
 
 EvoGroup 是一个在保持基础模型不变的条件下，根据交互反馈改进证据驱动群体智能体行为的自演化记忆 Harness。
 
-[论文](https://anonymous.4open.science/r/37883-8DC0/) · [代码](.) · [模型](#数据准备) · [数据集](#数据准备) · [English](README.md)
-
 <img src="assets/evog-framework.png" alt="EvoGroup 框架图" width="1000">
 
 </div>
