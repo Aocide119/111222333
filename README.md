@@ -162,9 +162,6 @@ The benchmark adapters load question episodes and source corpora from the suppli
 
 The evaluation layer keeps benchmark memory isolated per question and validates candidate checkpoints before activation. Standard answers are used by the evaluator and are not included in agent context.
 
-## Efficiency Analysis
-
-Across five matched analysis iterations, APD reduces analysis time by 42.5% and token use by 41.5% relative to full-trace analysis.
 
 ## Repository Structure
 
