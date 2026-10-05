@@ -69,6 +69,19 @@ class CreateArgs(Record):
     path: str | None = Field(default=None, exclude=True)
 
 
+class QueryToolArgs(Record):
+    """Public arguments shared by every declarative Operation query tool."""
+
+    query: str = Field(min_length=1, max_length=256)
+    patterns: list[str] = Field(default_factory=list, max_length=8)
+    selected_patterns: list[str] = Field(default_factory=list, max_length=2)
+    required_pattern_groups: list[Annotated[list[str], Field(min_length=1, max_length=8)]] = Field(
+        default_factory=list, max_length=8
+    )
+    optional_patterns: list[str] = Field(default_factory=list, max_length=8)
+    offset: int = Field(default=0, ge=0)
+
+
 ARGUMENTS = {
     "list_files": (
         ListArgs,
@@ -93,8 +106,9 @@ ARGUMENTS = {
 }
 
 
-def tool_definitions() -> list[dict[str, Any]]:
-    return [
+def tool_definitions(harness: Harness | None = None) -> list[dict[str, Any]]:
+    """Return the five built-ins plus any declarative Operation query tools."""
+    definitions = [
         {
             "type": "function",
             "function": {
@@ -105,6 +119,21 @@ def tool_definitions() -> list[dict[str, Any]]:
         }
         for name, (args, description) in ARGUMENTS.items()
     ]
+    if harness is None:
+        return definitions
+    query_schema = QueryToolArgs.model_json_schema()
+    for query_tool in harness.operations.query_tools:
+        definitions.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": query_tool.name,
+                    "description": query_tool.description,
+                    "parameters": query_schema,
+                },
+            }
+        )
+    return definitions
 
 
 def _public_schema(name: str, model: type[Record]) -> dict[str, Any]:
@@ -141,6 +170,7 @@ class Tools:
         if not set(group_ids).issubset(known):
             raise ContractError("One or more requested groups have no imported messages")
         self.harness = harness
+        self._operation_override = None
         self.frozen_memory = frozen_memory
         # Each source view is frozen at interaction start, even if a later import occurs.
         self.context: dict[str, list[dict[str, Any]]] = {}
@@ -268,11 +298,22 @@ class Tools:
     def execute(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         self.last_full_result = None
         self.last_result_path = None
-        if name not in ARGUMENTS:
-            raise ContractError("Unknown tool")
-        args = ARGUMENTS[name][0].model_validate(self._normalize_args(name, arguments))
+        if name in ARGUMENTS:
+            args = ARGUMENTS[name][0].model_validate(self._normalize_args(name, arguments))
+            operation = getattr(self, name)
+        else:
+            query_tool = next(
+                (item for item in self.harness.operations.query_tools if item.name == name), None
+            )
+            if query_tool is None:
+                raise ContractError("Unknown tool")
+            args = QueryToolArgs.model_validate(arguments)
+
+            def operation(validated: QueryToolArgs) -> dict[str, Any]:
+                return self._execute_query_tool(name, validated)
+
         before = self.delivered_refs.copy()
-        result = getattr(self, name)(args)
+        result = operation(args)
         self.last_full_result = result
         if len(dumps(result)) <= self.results.max_chars:
             return result
@@ -281,6 +322,27 @@ class Tools:
         preview = self.results.persist(result, refs)
         self.last_result_path = preview["full_result_path"]
         return preview
+
+    def _execute_query_tool(self, name: str, args: QueryToolArgs) -> dict[str, Any]:
+        """Run a registered query tool through the fixed grep implementation."""
+        query_tool = next(
+            (item for item in self.harness.operations.query_tools if item.name == name), None
+        )
+        if query_tool is None:
+            raise ContractError("Unknown tool")
+        search_args = SearchArgs.model_validate(
+            {
+                **args.model_dump(),
+                "target": query_tool.target,
+                "resource_path": query_tool.resource_path,
+            }
+        )
+        previous = self._operation_override
+        self._operation_override = self.harness.operations.for_query_tool(query_tool)
+        try:
+            return self.grep_search(search_args)
+        finally:
+            self._operation_override = previous
 
     def list_files(self, args: ListArgs) -> dict[str, Any]:
         prefix = self._logical_path(args.target, args.resource_path)
@@ -418,7 +480,7 @@ class Tools:
         if not terms and not groups:
             raise ContractError("Search needs a query, selected pattern or required group")
         matches = []
-        operations = self.harness.operations
+        operations = self._operation_override or self.harness.operations
 
         def contains(term: str, field: str) -> bool:
             return (
@@ -475,7 +537,7 @@ class Tools:
                     rank = sum(any(contains(term, field) for field in fields) for term in optional)
                     matches.append((path, index, line, rank))
         matches.sort(key=lambda match: (-match[3], match[0], match[1]))
-        selected = matches[args.offset : args.offset + self.harness.operations.search_limit]
+        selected = matches[args.offset : args.offset + operations.search_limit]
         rows = []
         returned_refs = set()
         response_chars = 0
@@ -500,7 +562,7 @@ class Tools:
                 # Only complete delivered source records qualify for citations.
                 if len(line) <= operations.excerpt_chars:
                     row_refs.add(record["ref"])
-                window = self.harness.operations.context_window
+                window = operations.context_window
                 if window:
                     neighborhood = self.context[source_path][
                         max(0, index - window) : index + window + 1
@@ -546,7 +608,7 @@ class Tools:
         return {
             "matches": rows,
             "total_matches": len(matches),
-            "mode": self.harness.operations.search_mode,
+            "mode": operations.search_mode,
             "truncated": truncated,
             "next_offset": next_offset if truncated else None,
         }

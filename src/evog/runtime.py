@@ -233,7 +233,7 @@ def interact(
                         "Tools are disabled. State missing evidence and include ANSWER BIAS when confidence is at or below 0.5.",
                     }
                 )
-            available = [] if final_turn else tool_definitions()
+            available = [] if final_turn else tool_definitions(harness)
             reply, messages = request(messages, available)
             store.event(run_id, "model", reply.model_dump(mode="json"))
             messages.append(assistant_message(reply))

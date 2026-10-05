@@ -144,6 +144,25 @@ def test_operations_cannot_exceed_fixed_runtime_ceiling(store, settings):
         candidate(store, plan, report)
 
 
+def test_operation_revision_can_register_a_query_tool(store, settings):
+    report, plan = prepare(store, settings)
+    plan.changes[0].path = "operations.json"
+    plan.changes[0].interface = "Operation"
+    plan.changes[0].content = json.dumps(
+        {
+            "query_tools": [
+                {
+                    "name": "query_sender",
+                    "description": "Find source records by sender.",
+                    "search_fields": ["sender"],
+                }
+            ]
+        }
+    )
+    revised = candidate(store, plan, report)
+    assert revised.operations.query_tools[0].name == "query_sender"
+
+
 def test_evolution_can_inspect_analysis_validate_and_repair_an_invalid_draft(store, settings):
     report, original = prepare(store, settings)
     draft = PlanDraft(summary=original.summary, changes=original.changes).model_dump()

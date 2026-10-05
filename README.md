@@ -58,6 +58,10 @@ The paper calls this stage **Multi-Interface Harness Revision**. The Evolve Agen
 - **Intervention:** checks, transformations, or constraints at execution boundaries;
 - **Policy:** rules controlling what to select, when to execute it, and in what order.
 
+Operation revisions may register additional bounded query tools through `operations.json`. Each
+entry is compiled by the fixed runtime from a declared search schema; it cannot execute Python,
+shell commands, imports, or arbitrary runtime code.
+
 A candidate `$H_{t+1}$` remains a proposal until it is executed and evaluated in the next round. Each change carries a manifest with its evidence, predicted repair, and regression risks. The best evaluated checkpoint is selected as `$H_{*}$`; if no candidate passes validation, the current Harness is retained.
 
 ## Installation

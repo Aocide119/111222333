@@ -7,7 +7,7 @@ import re
 from importlib.resources import files
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from evog.errors import ContractError
 from evog.io import dumps, fingerprint
@@ -24,15 +24,61 @@ class Representation(Record):
     include_reply_refs: bool = False
 
 
+SearchField = Literal[
+    "text", "sender", "timestamp", "group_id", "message_id", "ref", "reply_to", "metadata"
+]
+
+
+class QueryTool(Record):
+    """A declarative search tool that compiles to the fixed query runtime.
+
+    Operation revisions may add these entries, but they cannot provide Python,
+    shell, imports, or arbitrary callbacks.  This keeps the operation surface
+    extensible while preserving the runtime safety boundary.
+    """
+
+    name: str = Field(min_length=7, max_length=64, pattern=r"^query_[a-z][a-z0-9_]{0,47}$")
+    description: str = Field(min_length=1, max_length=400)
+    target: Literal["memory_units", "memory_store"] = "memory_units"
+    resource_path: str = Field(default="", max_length=512)
+    search_mode: Literal["any", "all"] = "any"
+    search_limit: int = Field(default=8, ge=1, le=30)
+    context_window: int = Field(default=0, ge=0, le=5)
+    search_fields: list[SearchField] = Field(
+        default_factory=lambda: [
+            "text",
+            "sender",
+            "timestamp",
+            "group_id",
+            "message_id",
+            "ref",
+            "reply_to",
+            "metadata",
+        ],
+        min_length=1,
+        max_length=8,
+    )
+    match_mode: Literal["literal", "word"] = "literal"
+    excerpt_chars: int = Field(default=1400, ge=256, le=4000)
+
+    @field_validator("resource_path")
+    @classmethod
+    def safe_resource_path(cls, value: str) -> str:
+        if (
+            value.startswith("/")
+            or "\\" in value
+            or "\x00" in value
+            or (value and any(part in {"", ".", ".."} for part in value.split("/")))
+        ):
+            raise ValueError("Query tool resource_path must be a safe relative path")
+        return value
+
+
 class Operations(Record):
     search_mode: str = Field(default="any", pattern=r"^(any|all)$")
     search_limit: int = Field(default=8, ge=1, le=30)
     context_window: int = Field(default=0, ge=0, le=5)
-    search_fields: list[
-        Literal[
-            "text", "sender", "timestamp", "group_id", "message_id", "ref", "reply_to", "metadata"
-        ]
-    ] = Field(
+    search_fields: list[SearchField] = Field(
         default_factory=lambda: [
             "text",
             "sender",
@@ -49,6 +95,30 @@ class Operations(Record):
     match_mode: Literal["literal", "word"] = "literal"
     read_limit: int = Field(default=20, ge=1, le=50)
     excerpt_chars: int = Field(default=1400, ge=256, le=4000)
+    query_tools: list[QueryTool] = Field(default_factory=list, max_length=8)
+
+    @model_validator(mode="after")
+    def unique_query_tool_names(self):
+        names = [tool.name for tool in self.query_tools]
+        if len(names) != len(set(names)):
+            raise ValueError("Query tool names must be unique")
+        builtins = {"list_files", "read_file", "grep_search", "write_file", "create_file"}
+        if builtins.intersection(names):
+            raise ValueError("Query tool names cannot replace built-in tools")
+        return self
+
+    def for_query_tool(self, tool: QueryTool) -> Operations:
+        """Compile one declarative query tool into fixed search settings."""
+        return self.model_copy(
+            update={
+                "search_mode": tool.search_mode,
+                "search_limit": tool.search_limit,
+                "context_window": tool.context_window,
+                "search_fields": tool.search_fields,
+                "match_mode": tool.match_mode,
+                "excerpt_chars": tool.excerpt_chars,
+            }
+        )
 
 
 class Interventions(Record):

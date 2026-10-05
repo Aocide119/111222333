@@ -16,13 +16,15 @@ Only these revision surfaces exist:
 | Interface | File | Permitted change |
 | --- | --- | --- |
 | Representation | `representation.json` | Source views: visible metadata, timestamps, reply references |
-| Operation | `operations.json` | Declared executable search/read behavior and its allowed limits |
+| Operation | `operations.json` | Declared executable search/read behavior, limits, and registered query tools |
 | Policy | `prompts/group.md`, `skills/<lowercase-name>.md` | Decision rules or reusable workflows |
 | Intervention | `interventions.json` | Allowed mechanical answer-boundary checks and limits |
 
 Choose the interface for what changes, then use its permitted file. The runtime enforces this
-mapping: a search setting in `operations.json` is Operation; prompt guidance is Policy. Do not
-invent another component system, registration file, tool implementation, or writable workspace.
+mapping: a search setting or declarative `query_tools` entry in `operations.json` is Operation;
+prompt guidance is Policy. A query tool is a fixed-runtime search recipe with a schema, scope,
+and bounded search behavior. Do not add Python, shell, imports, callbacks, arbitrary executable
+code, another registration file, or a writable workspace.
 
 Fixed inputs include provider/model, deployment settings, reasoning and output budgets, runtime
 code, trace collection, feedback, source records, and verifier/judge behavior. Never revise them.

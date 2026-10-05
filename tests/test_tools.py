@@ -32,6 +32,65 @@ def test_five_tools_and_scoped_read_view(store):
         Tools(store, store.harness(), ["unknown"])
 
 
+def test_operation_can_register_a_declarative_query_tool(store):
+    operations = json.dumps(
+        {
+            "query_tools": [
+                {
+                    "name": "query_sender",
+                    "description": "Find source records by sender.",
+                    "search_fields": ["sender"],
+                    "match_mode": "word",
+                }
+            ]
+        }
+    )
+    tools = tools_for(store, **{"operations.json": operations})
+    definitions = tool_definitions(tools.harness)
+    assert len(definitions) == 6
+    assert definitions[-1]["function"]["name"] == "query_sender"
+    result = tools.execute("query_sender", {"query": "User_1"})
+    assert result["total_matches"] == 1
+    assert result["matches"][0]["ref"] == "demo-team/001"
+
+
+def test_operation_query_tools_remain_declarative_and_scoped(store):
+    with pytest.raises(ValueError):
+        tools_for(
+            store,
+            **{
+                "operations.json": json.dumps(
+                    {
+                        "query_tools": [
+                            {
+                                "name": "query_escape",
+                                "description": "invalid",
+                                "resource_path": "../outside",
+                            }
+                        ]
+                    }
+                )
+            },
+        )
+    with pytest.raises(ValueError):
+        tools_for(
+            store,
+            **{
+                "operations.json": json.dumps(
+                    {
+                        "query_tools": [
+                            {
+                                "name": "query_code",
+                                "description": "invalid",
+                                "implementation": "python:os.system",
+                            }
+                        ]
+                    }
+                )
+            },
+        )
+
+
 def test_source_view_is_frozen_at_run_start(store):
     tools = tools_for(store)
     store.ingest(iter([Message.model_validate({**DEMO_MESSAGES[0], "message_id": "003"})]))
