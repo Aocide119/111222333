@@ -25,7 +25,7 @@ class DemoProvider:
                     }
                 )
             )
-        if "read-only experience analyst" in system:
+        if "read-only experience analyst" in system or "ou are a analyze agent" in system:
             tool_messages = [message for message in messages if message["role"] == "tool"]
             request = json.loads(messages[1]["content"])
             if not tool_messages:
@@ -83,7 +83,7 @@ class DemoProvider:
                     }
                 )
             )
-        if "propose evidence-driven revisions" in system:
+        if "propose evidence-driven revisions" in system or "You are the evolution agent." in system:
             if not json.loads(messages[1]["content"]).get("findings"):
                 return ModelReply(content='{"summary":"No supported change","changes":[]}')
             return ModelReply(
