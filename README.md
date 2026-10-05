@@ -267,36 +267,6 @@ uv run evog benchmark cycle groupmembench --data-root /path/to/GroupMemBench-mai
   --domain Finance --question-type multi_hop --limit 2 --output results.json
 ```
 
-## Prompts and Runtime Contracts
-
-| Stage | Prompt | Loaded by | Model output |
-| --- | --- | --- | --- |
-| Group interaction | [group.md](src/evog/prompts/group.md) | `runtime.py` via the active harness | `FINAL ANSWER`, `CONFIDENCE`, conditional `ANSWER BIAS` |
-| Pre-feedback reflection | [reflect.md](src/evog/prompts/reflect.md) | `runtime.py` | Reflection JSON |
-| Trace diagnosis | [analyze.md](src/evog/prompts/analyze.md) | `analysis.py` | Diagnosis JSON with inspected evidence ranges |
-| Finding synthesis | [synthesize.md](src/evog/prompts/synthesize.md) | `analysis.py` | Findings JSON from included failure diagnoses |
-| Harness revision | [evolve.md](src/evog/prompts/evolve.md) | `evolution.py` | Plan JSON over permitted files |
-
-The system message for answering combines the active harness's `group.md` with the fixed
-`GROUNDING` contract in [runtime.py](src/evog/runtime.py). The initial harness copies the packaged
-group prompt; changing that file changes new workspaces, while existing workspaces use their
-versioned prompt. Only the group prompt and reusable skills are evolvable policy surfaces.
-Analysis, reflection and evolution prompts stay in the fixed runtime and receive their typed
-JSON schemas at call time. Answering remains plain text. Confidence at or below 0.5 requires an
-`ANSWER BIAS` block of at least 80 characters. Multiple-choice adapters request the option letter
-in `FINAL ANSWER` and retain the remaining protocol fields.
-
-Answering has five scoped tools; archived response chunks are read with `read_file`,
-`target="workspace"`, and a `tool_results/...` resource path. Diagnosis and revision use
-`inspect_trace`, `search_trace`, and `read_tool_result` for read-only trace access. Revision also
-has `read_analysis`, `register_finding`, and `validate_revision`. Standard answers and judge
-instructions are supplied only to the evaluation stage.
-
-Text answers do not carry a structured citation list, so citation-count checks apply to the
-compatible structured-answer path. Text answers still receive grounding instructions, confidence
-and size validation, and a record of delivered evidence. Evidence delivery alone does not prove
-the answer's semantic correctness.
-
 ## Development
 
 ```bash

@@ -246,32 +246,6 @@ uv run evog benchmark cycle groupmembench --data-root /path/to/GroupMemBench-mai
   --domain Finance --question-type multi_hop --limit 2 --output results.json
 ```
 
-## Prompt 与运行约束
-
-| 阶段 | Prompt 文件 | 加载位置 | 模型输出 |
-| --- | --- | --- | --- |
-| 群问答 | [group.md](src/evog/prompts/group.md) | `runtime.py`，读取当前 Harness | `FINAL ANSWER`、`CONFIDENCE`、条件式 `ANSWER BIAS` |
-| 反馈前反思 | [reflect.md](src/evog/prompts/reflect.md) | `runtime.py` | Reflection JSON |
-| 轨迹诊断 | [analyze.md](src/evog/prompts/analyze.md) | `analysis.py` | 包含已检查证据范围的 Diagnosis JSON |
-| 发现综合 | [synthesize.md](src/evog/prompts/synthesize.md) | `analysis.py` | 从实际提供的失败诊断生成 Findings JSON |
-| Harness 演化 | [evolve.md](src/evog/prompts/evolve.md) | `evolution.py` | 限于允许文件的 Plan JSON |
-
-答题阶段的 system message 由当前 Harness 中的 `group.md` 与
-[runtime.py](src/evog/runtime.py) 中固定的 `GROUNDING` 合同共同组成。初始 Harness 会复制
-随代码提供的群问答 prompt；修改该文件影响新工作区，已有工作区继续读取版本化 prompt。
-可演化的策略文件包括群问答 prompt 与通用 skills；分析、反思、演化 prompt 属于固定运行时，
-调用时附加对应的 JSON schema。答题保持文本协议，置信度不超过 0.5 时必须提供至少 80 字符的
-`ANSWER BIAS`。选择题在 `FINAL ANSWER` 中只填写选项字母，同时保留其余协议字段。
-
-答题阶段使用五个有范围约束的工具。截断结果的归档块通过 `read_file` 读取，指定
-`target="workspace"` 和 `tool_results/...` 相对资源路径。诊断与演化阶段通过
-`inspect_trace`、`search_trace`、`read_tool_result` 只读检查轨迹；演化还提供
-`read_analysis`、`register_finding`、`validate_revision`。标准答案与 judge 指令仅在评分阶段提供。
-
-文本回答不携带结构化引用列表，因此引用数量校验适用于兼容的结构化回答路径。
-文本回答仍接收证据约束，并执行置信度和长度校验、保存实际送达的证据记录。
-证据送达本身不能证明回答语义正确。
-
 ## 开发
 
 ```bash
