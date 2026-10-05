@@ -140,13 +140,13 @@ def ever_root(tmp_path):
                             {
                                 "dialogue": "The release is scheduled for January 12.",
                                 "message_index": 1,
-                                "speaker": "Maya",
+                                "speaker": "User_1",
                                 "time": "2025-01-05 09:00:00",
                             },
                             {
                                 "dialogue": "The release schedule has changed to January 15.",
                                 "message_index": 2,
-                                "speaker": "Noah",
+                                "speaker": "User_2",
                                 "time": "2025-01-05 10:00:00",
                             },
                         ],
@@ -157,7 +157,7 @@ def ever_root(tmp_path):
                             {
                                 "dialogue": "The schedule was confirmed.",
                                 "message_index": 1,
-                                "speaker": "Noah",
+                                "speaker": "User_2",
                                 "time": "2025-01-06 10:00:00",
                             }
                         ]

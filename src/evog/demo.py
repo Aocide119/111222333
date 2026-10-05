@@ -142,14 +142,14 @@ DEMO_MESSAGES = [
     {
         "group_id": "demo-team",
         "message_id": "001",
-        "sender": "Maya",
+        "sender": "User_1",
         "timestamp": "2026-01-05T09:00:00+08:00",
         "text": "The release is scheduled for January 12.",
     },
     {
         "group_id": "demo-team",
         "message_id": "002",
-        "sender": "Noah",
+        "sender": "User_2",
         "timestamp": "2026-01-06T10:00:00+08:00",
         "text": "The release schedule has changed to January 15.",
         "reply_to": "001",

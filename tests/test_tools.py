@@ -219,7 +219,7 @@ def test_search_ledger_is_runtime_owned(store):
 @pytest.mark.parametrize(
     "term,refs",
     [
-        ("MAYA", {"demo-team/001"}),
+        ("USER_1", {"demo-team/001"}),
         ("2026-01-06", {"demo-team/002"}),
         ("+08:00", {"demo-team/001", "demo-team/002"}),
         ("demo-team", {"demo-team/001", "demo-team/002"}),
@@ -234,7 +234,7 @@ def test_search_finds_attribution_local_date_and_message_links(store, term, refs
 
 def test_search_conjunction_combines_sender_date_and_body(store):
     tools = tools_for(store, **{"operations.json": '{"search_mode":"all"}'})
-    result = tools.execute("grep_search", {"terms": ["Noah", "2026-01-06", "changed"]})
+    result = tools.execute("grep_search", {"terms": ["User_2", "2026-01-06", "changed"]})
     assert [match["ref"] for match in result["matches"]] == ["demo-team/002"]
     assert tools.execute("grep_search", {"terms": ["sender"]})["total_matches"] == 0
 
@@ -346,8 +346,8 @@ def test_representation_and_operation_extensions_change_executed_views(store):
         },
     )
     assert tools.execute("grep_search", {"terms": ["release"]})["total_matches"] == 0
-    assert tools.execute("grep_search", {"terms": ["May"]})["total_matches"] == 0
-    found = tools.execute("grep_search", {"terms": ["Maya"]})
+    assert tools.execute("grep_search", {"terms": ["User"]})["total_matches"] == 0
+    found = tools.execute("grep_search", {"terms": ["User_1"]})
     assert found["total_matches"] == 1
     path = next(iter(tools.context))
     assert len(tools.execute("read_file", {"path": path})["lines"]) == 1

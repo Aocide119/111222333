@@ -1,3 +1,3 @@
-{"group_id":"product","message_id":"m1","sender":"Maya","timestamp":"2026-01-05T09:00:00+08:00","text":"The release is scheduled for January 12."}
-{"group_id":"product","message_id":"m2","sender":"Noah","timestamp":"2026-01-06T10:00:00+08:00","text":"The release schedule has changed to January 15.","reply_to":"m1"}
-{"group_id":"design","message_id":"d1","sender":"Lin","timestamp":"2026-01-06T11:00:00+08:00","text":"The accessibility review is owned by Maya."}
+{"group_id":"product","message_id":"m1","sender":"User_1","timestamp":"2026-01-05T09:00:00+08:00","text":"The release is scheduled for January 12."}
+{"group_id":"product","message_id":"m2","sender":"User_2","timestamp":"2026-01-06T10:00:00+08:00","text":"The release schedule has changed to January 15.","reply_to":"m1"}
+{"group_id":"design","message_id":"d1","sender":"User_3","timestamp":"2026-01-06T11:00:00+08:00","text":"The accessibility review is owned by User_1."}
