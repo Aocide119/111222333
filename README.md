@@ -50,7 +50,6 @@ uncertainty **before external feedback is revealed**.
 
 The cold-start tools are `list_files`, `read_file`, `grep_search`, `write_file`, and `create_file`.
 Original conversation records remain the evidence source; learned notes are navigation aids.
-Each query has a fixed ceiling of 20 executed tool requests and a 500-second task budget.
 Long-term notes belong to the exact authorized group set; working memory starts fresh per query.
 
 ### 2. Confidence-Guided Trajectory Selection
@@ -63,10 +62,6 @@ The paper combines confidence with external correctness, using a confidence thre
 | **CW** — confident and wrong | An unrecognized failure | Prioritized diagnosis |
 | **UC** — unconfident and correct | A fragile success | Prioritized diagnosis + reflection |
 | **UW** — unconfident and wrong | A recognized uncertainty or failure | Prioritized diagnosis + reflection |
-
-The CLI accepts optional user/business **accepted/rejected** feedback.
-Unjudged interactions remain explicit; uncertainty alone does not establish incorrectness.
-Infrastructure incidents are recorded separately.
 
 ### 3. From Trace Details to Recurring Patterns
 
@@ -126,9 +121,7 @@ selected evaluated harness. Bold marks the highest reported aggregate in each ba
 | **$H_0$ → $H_{*}$ change** | **+16.19 pp** | **+18.51 pp** | **+15.36 pp** |
 
 The paper uses 720 fixed evolution questions drawn from 2,400 EverMemBench questions,
-plus 1,680 separate held-out questions. The values above retain the main table's reported
-aggregate convention; they have not been recomputed here. GPT-5.5 $H_{*}$ remains below Codex and
-Claude Code in that table.
+plus 1,680 separate held-out questions.
 
 ### Frozen Transfer to GroupMemBench
 
@@ -140,9 +133,6 @@ The evolved harness is applied without further evolution or tuning. The paper re
 | GPT-5.5 | 61.88% | 63.89% | +2.01 pp |
 | DeepSeek-V4-Flash | 74.09% | 71.14% | −2.95 pp |
 
-Transfer is model-dependent: GPT-5.5 improves, while DeepSeek-V4-Flash regresses relative to
-its initial harness. The study therefore does not establish uniform improvement across datasets.
-
 ### Analysis Efficiency and Component Ablation
 
 Across five matched analysis iterations, APD reports **42.5% less analysis time** and
@@ -153,10 +143,9 @@ Across five matched analysis iterations, APD reports **42.5% less analysis time*
 </p>
 
 The original component-ablation graphic compares individual evolved components with the
-initial harness. Tools and prompts show the largest individual gains in this setting.
-The paper also reports reduced performance when APD or bucketed analysis is removed, while
-trajectory selection has limited benefit in the tested process ablation.
-See [result sources](assets/README.md) for figure and table details.
+initial harness. Tools and prompts show the largest individual gains in this setting. The paper
+also reports reduced performance when APD or bucketed analysis is removed, while trajectory
+selection has limited benefit in the tested process ablation.
 
 ## Quick Start
 
@@ -184,10 +173,26 @@ Use `evog` in place of `uv run evog` after activating this environment.
 
 </details>
 
+### Configuration
+
+Copy [.env.example](.env.example), replace the placeholder endpoint, model, and API key, and
+export the variables in your shell. EvoG does not load `.env` files automatically. Use
+[examples/benchmark.toml](examples/benchmark.toml) as a starting point for deployment and
+benchmark settings, then pass it with `--config`:
+
+```bash
+set -a
+source .env.example
+set +a
+uv run evog --config examples/benchmark.toml --workspace /tmp/evog-demo demo
+```
+
 ### Run the Offline Demo
 
 ```bash
 uv run evog --workspace /tmp/evog-demo demo
+# or use the checked-in wrapper
+./examples/run_demo.sh
 ```
 
 The demo uses synthetic conversations and a deterministic fixture provider. It runs import,
@@ -227,9 +232,9 @@ uv run evog rollback REVISION_ID
 
 Record `accepted` or `rejected` according to the actual outcome; the example selects a failure
 for diagnosis. Use the IDs printed by the preceding commands. Apply only a plan with changes.
-`apply` activates a structurally validated
-candidate; its business effect must be checked in subsequent use. An empty plan is valid when
-no finding supports a change. Use `trace RUN_ID` to inspect a run and `ask --json` for structured output.
+`apply` activates a structurally validated candidate; its business effect must be checked in
+subsequent use. An empty plan is valid when no finding supports a change. Use `trace RUN_ID` to
+inspect a run and `ask --json` for structured output.
 
 ## Project Structure
 
@@ -275,6 +280,3 @@ uv run ruff check .
 uv run ruff format --check .
 uv build
 ```
-
-Private conversations, traces, and feedback live in `.evog/`, which is excluded from Git.
-Live provider compatibility and business quality require deployment validation.
