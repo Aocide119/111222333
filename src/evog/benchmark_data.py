@@ -47,10 +47,7 @@ class Episode(Record):
             parts.append(f"The user asking this question is {self.asking_user_id}.")
         if self.options:
             parts.append("Options:\n" + "\n".join(f"{k}: {v}" for k, v in self.options.items()))
-            parts.append(
-                "Put only the chosen option letter after FINAL ANSWER:. "
-                "Keep CONFIDENCE and, when required, ANSWER BIAS in the text protocol."
-            )
+            parts.append("Put only the chosen option letter in the FINAL ANSWER section.")
         return "\n\n".join(parts)
 
 

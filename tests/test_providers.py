@@ -160,6 +160,7 @@ def test_deadline_bounds_http_timeout_and_prevents_retries_after_expiry(monkeypa
 
 
 def test_stalled_requests_retry_within_a_bounded_attempt_count(monkeypatch):
+    monkeypatch.setattr("evog.providers.time.sleep", lambda _: None)
     calls = []
 
     def respond(request):
@@ -171,3 +172,81 @@ def test_stalled_requests_retry_within_a_bounded_attempt_count(monkeypatch):
     with httpx.Client(transport=httpx.MockTransport(respond)) as client:
         assert ChatProvider(settings(), client=client).complete([], []).content == "{}"
     assert len(calls) == 3
+
+
+def test_stage_requests_send_sampling_controls_and_keep_reasoning_disabled():
+    requests = []
+
+    def respond(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]})
+
+    configured = settings().model_copy(
+        update={
+            "temperature": 0.1,
+            "sampling_seed": 17,
+            "analysis_temperature": 0.2,
+            "synthesis_temperature": 0.3,
+            "reflection_temperature": 0.4,
+            "evolution_temperature": 0.7,
+        }
+    )
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        provider = ChatProvider(configured, client=client)
+        provider.complete([], [])
+        for stage in ("reflection", "analysis", "synthesis", "evolution"):
+            stage_provider(provider, configured, stage).complete([], [])
+    assert [r["temperature"] for r in requests] == [0.1, 0.4, 0.2, 0.3, 0.7]
+    assert [r["max_completion_tokens"] for r in requests] == [8192, 8192, 20000, 20000, 32000]
+    assert all(r["seed"] == 17 and r["model"] == "example" for r in requests)
+    assert all(
+        r["reasoning_effort"] == "none" and r["thinking"] == {"type": "disabled"} for r in requests
+    )
+
+
+def test_optional_sampling_controls_are_omitted():
+    requests = []
+
+    def respond(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]})
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        ChatProvider(settings(), client=client).complete([], [])
+    assert "seed" not in requests[0] and "temperature" not in requests[0]
+
+
+@pytest.mark.parametrize("failure", ["timeout", "http"])
+def test_analysis_transport_retries_three_total_attempts_with_ten_second_backoff(
+    monkeypatch, failure
+):
+    attempts, delays = [], []
+    monkeypatch.setattr("evog.providers.time.sleep", delays.append)
+
+    def respond(request):
+        attempts.append(1)
+        if failure == "timeout":
+            raise httpx.ReadTimeout("stalled", request=request)
+        return httpx.Response(503)
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        provider = stage_provider(ChatProvider(settings(), client=client), settings(), "analysis")
+        with pytest.raises(ProviderError):
+            provider.complete([], [])
+    assert len(attempts) == 3 and delays == [10, 20]
+
+
+def test_backoff_that_exceeds_deadline_does_not_sleep_or_issue_another_request(monkeypatch):
+    attempts, delays = [], []
+    monkeypatch.setattr("evog.providers.time.monotonic", lambda: 10)
+    monkeypatch.setattr("evog.providers.time.sleep", delays.append)
+
+    def respond(request):
+        attempts.append(1)
+        return httpx.Response(503)
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        provider = stage_provider(ChatProvider(settings(), client=client), settings(), "analysis")
+        with pytest.raises(DeadlineExceeded):
+            provider.complete_before([], [], deadline=15)
+    assert len(attempts) == 1 and delays == []

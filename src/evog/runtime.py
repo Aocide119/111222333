@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from collections import Counter
+from collections.abc import Callable
 from threading import Event
 from typing import Any
 from uuid import uuid4
@@ -15,6 +16,7 @@ from evog.config import Settings
 from evog.errors import ContractError, DeadlineExceeded, EvoGError, ProviderError, RunFailed
 from evog.harness import Harness, prompt
 from evog.io import dumps
+from evog.memory import QuestionMemory
 from evog.models import Answer, AnswerDraft, Reflection
 from evog.providers import Provider, assistant_message, complete_before, stage_provider
 from evog.store import Store
@@ -28,7 +30,7 @@ missing evidence. Insufficient answers cannot have confidence above 0.5.
 Return only this plain-text protocol, with no markdown fences or extra commentary:
 FINAL ANSWER: <natural-language answer>
 CONFIDENCE: <number from 0 to 1>
-If confidence is at or below 0.5, append ANSWER BIAS: with at least 80 characters explaining what was searched, what was
+If confidence is at or below 0.5, append ANSWER BIAS: and explain what was searched, what was
 found, what is missing, and whether the limitation was retrieval, reasoning, tools, or budget.
 """
 
@@ -103,6 +105,8 @@ def interact(
     memory_session: str | None = None,
     isolated_long_term: bool = False,
     cancel_event: Event | None = None,
+    frozen_memory: QuestionMemory | None = None,
+    run_started: Callable[[str], None] | None = None,
 ) -> Answer:
     if not question.strip() or len(question) > 10000:
         raise ContractError("Question must contain 1–10000 characters")
@@ -110,6 +114,8 @@ def interact(
     deadline = started + settings.question_timeout_seconds
     harness = harness or store.harness()
     run_id = uuid4().hex
+    if frozen_memory is not None:
+        frozen_memory.bind_run(run_id)
     # The product accepts a smaller caller-provided budget, never a larger one.
     tool_call_limit = min(int(settings.max_tool_calls), MAX_TOOL_CALLS_HARD_LIMIT)
     tools = Tools(
@@ -120,12 +126,23 @@ def interact(
         isolated_long_term=isolated_long_term,
         result_session=run_id,
         max_output_chars=settings.max_tool_output_chars,
+        frozen_memory=frozen_memory,
     )
     store.start_run(run_id, harness.id, question, sorted(set(group_ids)))
+    if run_started is not None:
+        run_started(run_id)
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": harness.system_prompt + "\n" + GROUNDING},
         {"role": "user", "content": dumps({"question": question, "authorized_groups": group_ids})},
     ]
+    if frozen_memory is not None:
+        messages[0]["content"] += (
+            "\nFrozen round memory: other questions cannot see your writes this round. "
+            "Long-term writes must be JSON with entries [{ref, excerpt}]; each excerpt "
+            "must be copied exactly from a fully read authorized source record. "
+            "Use working_memory for summaries, plans, and unresolved notes. Long-term entries "
+            "are merged by canonical union after the round; replacement does not delete prior entries."
+        )
     calls_used = rounds_used = 0
     contract_failed = False
     repeated: Counter[str] = Counter()
@@ -145,6 +162,8 @@ def interact(
             "max_tool_output_chars": settings.max_tool_output_chars,
             "max_context_chars": settings.max_context_chars,
             "context_trim_ratio": settings.context_trim_ratio,
+            "final_answer_within_turn_budget": settings.final_answer_within_turn_budget,
+            "memory_snapshot_id": frozen_memory.parent.snapshot_id if frozen_memory else None,
         },
     )
 
@@ -184,15 +203,16 @@ def interact(
             raise _InteractionStopped("budget_exhausted", "question_timeout") from exc
 
     try:
-        # The reserved final answer is additional to the normal interaction-turn budget.
-        for turn in range(settings.max_turns + 1):
+        # Legacy product mode reserves an extra answer turn; research mode counts it.
+        final_index = settings.max_turns - int(settings.final_answer_within_turn_budget)
+        for turn in range(final_index + 1):
             check_deadline()
             if not boundary:
                 if calls_used >= tool_call_limit:
                     boundary = "tool_call_budget"
                 elif rounds_used >= settings.max_tool_rounds:
                     boundary = "tool_round_budget"
-                elif turn == settings.max_turns:
+                elif turn == final_index:
                     boundary = "turn_budget"
             final_turn = bool(boundary)
             if final_turn:
@@ -320,8 +340,7 @@ def interact(
                 messages.append(
                     {
                         "role": "user",
-                        "content": f"Output validation failed: {reason}. Return corrected FINAL ANSWER and CONFIDENCE text; "
-                        "include ANSWER BIAS with at least 80 characters when confidence is at or below 0.5.",
+                        "content": f"Output validation failed: {reason}. Return only corrected FINAL ANSWER and CONFIDENCE text.",
                     }
                 )
                 continue
@@ -364,6 +383,8 @@ def interact(
                     },
                 ]
                 try:
+                    reflection_started = time.monotonic()
+                    reflected = None
                     reflection_provider = stage_provider(provider, settings, "reflection")
                     reflection_deadline = min(
                         deadline, time.monotonic() + settings.reflection_timeout_seconds
@@ -373,10 +394,27 @@ def interact(
                     )
                     reflection = Reflection.model_validate_json(reflected.content)
                     store.event(
-                        run_id, "reflection", {**reflection.model_dump(), "usage": reflected.usage}
+                        run_id,
+                        "reflection",
+                        {
+                            **reflection.model_dump(),
+                            "usage": reflected.usage,
+                            "response_model": reflected.response_model,
+                            "http_attempts": reflected.http_attempts,
+                            "seconds": round(time.monotonic() - reflection_started, 3),
+                        },
                     )
                 except (EvoGError, ValueError):
-                    store.event(run_id, "error", {"code": "reflection_unavailable"})
+                    store.event(
+                        run_id,
+                        "error",
+                        {
+                            "code": "reflection_unavailable",
+                            "seconds": round(time.monotonic() - reflection_started, 3),
+                            "usage": reflected.usage if reflected is not None else {},
+                            "usage_complete": reflected is not None,
+                        },
+                    )
             answer = Answer(
                 **draft.model_dump(),
                 run_id=run_id,

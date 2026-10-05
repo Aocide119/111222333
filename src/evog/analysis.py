@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from uuid import uuid4
@@ -11,10 +12,10 @@ from uuid import uuid4
 from pydantic import Field, ValidationError
 
 from evog.config import Settings
-from evog.errors import ContractError, EvoGError, ProviderError
+from evog.errors import ContractError, EvoGError
 from evog.harness import prompt
-from evog.io import dumps, safe_path
-from evog.models import AnalysisReport, Diagnosis, EvidenceRef, Finding, Record
+from evog.io import dumps, fingerprint, safe_path
+from evog.models import AnalysisReport, Diagnosis, EvidenceRef, Finding, QueryBucket, Record
 from evog.pointers import resolve_pointer
 from evog.providers import Provider, assistant_message, complete_before, stage_provider
 from evog.runtime import trim_messages
@@ -280,6 +281,7 @@ def select_experience(
             "UW",
             "unjudged_high",
             "unjudged_low",
+            "missing_confidence",
         )
     }
     selected, controls = [], []
@@ -306,7 +308,11 @@ def select_experience(
             elif run["status"] in ("provider_failed", "tool_failed"):
                 coverage["incidents"] += 1
             continue
-        low = run["answer"]["confidence"] <= settings.confidence_threshold
+        confidence = (run.get("answer") or {}).get("confidence")
+        if confidence is None:
+            coverage["missing_confidence"] += 1
+            continue
+        low = confidence <= settings.confidence_threshold
         outcome = run["outcome"]
         label = (
             ("U" if low else "C") + ("C" if outcome == "accepted" else "W")
@@ -343,10 +349,16 @@ def select_experience(
         key = question_key(row_by_id[run_id])
         if key not in selected_group_order:
             selected_group_order.append(key)
-    selected_groups = set(selected_group_order[: settings.analysis_max_runs])
+    selected_groups = set(
+        selected_group_order
+        if settings.analysis_all_eligible or settings.analysis_max_runs is None
+        else selected_group_order[: settings.analysis_max_runs]
+    )
     selected = [run_id for run_id in selected if question_key(row_by_id[run_id]) in selected_groups]
     controls.sort()
     coverage["eligible"] = eligible_before
+    coverage["eligible_questions"] = len(selected_group_order)
+    coverage["omitted_questions"] = len(selected_group_order) - len(selected_groups)
     coverage["selected"] = len(selected_groups)
     coverage["controls"] = min(len(controls), 2)
     return {
@@ -419,25 +431,20 @@ def diagnose(
     ]
     inspected_here: set[str] = set()
     format_repairs = 0
-    provider_failures = 0
     for turn in range(settings.analysis_turns):
         messages = trim_messages(
             messages, int(settings.analysis_max_context_chars * settings.context_trim_ratio)
         )
         if len(dumps(messages)) > settings.analysis_max_context_chars:
             raise ContractError("Analysis task anchors exceed the context budget")
-        try:
-            reply = complete_before(
-                provider,
-                messages,
-                analysis_tools() if turn < settings.analysis_turns - 1 else [],
-                deadline,
-            )
-        except ProviderError:
-            provider_failures += 1
-            if provider_failures >= settings.call_attempts or turn == settings.analysis_turns - 1:
-                raise
-            continue
+        # Transport retries belong to the provider. A second retry loop here would
+        # multiply the configured number of API attempts and consume analysis turns.
+        reply = complete_before(
+            provider,
+            messages,
+            analysis_tools() if turn < settings.analysis_turns - 1 else [],
+            deadline,
+        )
         messages.append(assistant_message(reply))
         if reply.tool_calls:
             if turn == settings.analysis_turns - 1:
@@ -479,7 +486,7 @@ def diagnose(
                     "content": "The diagnosis failed validation: "
                     + dumps(errors)[:2000]
                     + ". Return only the corrected JSON object. Do not add fields. "
-                    "Use a short query_type and a supplied query_family. Copy evidence_ref values exactly "
+                    "Infer a short open semantic query_type from the question; query_family is only a legacy classification. Copy evidence_ref values exactly "
                     "from tool results you inspected. Give a supported mechanism and actionable implication, "
                     "or explicitly describe what remains unknown; never invent a cause to pass validation.",
                 }
@@ -517,6 +524,192 @@ def check_diagnosis_quality(diagnosis: Diagnosis) -> None:
         raise ContractError(
             "Diagnosis needs a reusable implication or a specific missing-evidence check"
         )
+
+
+def normalize_query_type(label: str) -> str:
+    """Normalize spelling only; semantic alias merging is deliberately not inferred."""
+    normalized = " ".join(label.split()).casefold()
+    if not normalized:
+        raise ContractError("A query bucket needs a nonblank semantic label")
+    return normalized
+
+
+def _experience_cell(row: dict[str, Any], threshold: float) -> str:
+    if row["status"] != "completed":
+        return row["status"]
+    confidence = (row.get("answer") or {}).get("confidence")
+    if confidence is None:
+        return "missing_confidence"
+    prefix = "U" if confidence <= threshold else "C"
+    if row.get("outcome") is None:
+        return "unjudged_low" if prefix == "U" else "unjudged_high"
+    return prefix + ("C" if row["outcome"] == "accepted" else "W")
+
+
+def _synthesis_input(
+    phase: str,
+    units: list[tuple[str, dict[str, Any]]],
+    coverage: dict[str, int],
+    incomplete: dict[str, str],
+    minimum_support: int,
+) -> dict[str, Any]:
+    buckets: dict[str, list[dict[str, Any]]] = {}
+    for label, unit in units:
+        buckets.setdefault(label, []).append(unit)
+    return {
+        "phase": phase,
+        "coverage": coverage,
+        "buckets": buckets,
+        "finding_min_support": minimum_support,
+        "incomplete": {"unavailable_items": len(incomplete)},
+        "coverage_note": (
+            "Only complete included items support this batch. Missing items and other batches "
+            "are not evidence. Bucket inputs contain condensed diagnoses; cross_bucket inputs "
+            "contain verified bucket findings. Unjudged and nonsemantic failures retain their labels."
+        ),
+    }
+
+
+def _synthesis_batches(
+    phase: str,
+    units: list[tuple[str, dict[str, Any]]],
+    coverage: dict[str, int],
+    incomplete: dict[str, str],
+    settings: Settings,
+    system: str,
+) -> tuple[list[list[tuple[str, dict[str, Any]]]], list[tuple[str, dict[str, Any]]]]:
+    """Pack complete inputs; overlarge items are explicitly reported, never sliced."""
+    limit = int(settings.synthesis_max_context_chars * settings.context_trim_ratio)
+
+    def fits(batch: list[tuple[str, dict[str, Any]]]) -> bool:
+        supplied = _synthesis_input(
+            phase, batch, coverage, incomplete, settings.finding_min_support
+        )
+        return (
+            len(
+                dumps(
+                    [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": dumps(supplied)},
+                    ]
+                )
+            )
+            <= limit
+        )
+
+    batches, omitted, current = [], [], []
+    for item in units:
+        if fits([*current, item]):
+            current.append(item)
+            continue
+        if current:
+            batches.append(current)
+            current = []
+        if fits([item]):
+            current = [item]
+        else:
+            omitted.append(item)
+    if current:
+        batches.append(current)
+    return batches, omitted
+
+
+def _synthesize_batch(
+    provider: Provider,
+    settings: Settings,
+    phase: str,
+    units: list[tuple[str, dict[str, Any]]],
+    coverage: dict[str, int],
+    incomplete: dict[str, str],
+    system: str,
+    rows: dict[str, dict[str, Any]],
+    targets_by_purpose: dict[str, set[str]],
+    key_for: Callable[[str], tuple[str, tuple[str, ...]]],
+) -> list[Finding]:
+    supplied = _synthesis_input(phase, units, coverage, incomplete, settings.finding_min_support)
+    allowed_refs = {
+        ref_key(EvidenceRef.model_validate(ref)) for _, unit in units for ref in unit["evidence"]
+    }
+    refs_by_query_type: dict[str, set[str]] = {}
+    for _, unit in units:
+        unit_refs = {ref_key(EvidenceRef.model_validate(ref)) for ref in unit["evidence"]}
+        for label in unit.get("query_types", [unit["query_type"]]):
+            refs_by_query_type.setdefault(normalize_query_type(label), set()).update(unit_refs)
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": dumps(supplied)},
+    ]
+    limit = int(settings.synthesis_max_context_chars * settings.context_trim_ratio)
+    deadline = time.monotonic() + settings.synthesis_timeout_seconds
+    bounded_provider = stage_provider(provider, settings, "synthesis")
+    for attempt in range(settings.call_attempts):
+        messages = trim_messages(messages, limit)
+        if len(dumps(messages)) > settings.synthesis_max_context_chars:
+            raise ContractError("Synthesis anchors exceed the context budget")
+        # Transport failure ends this batch; only invalid model output gets a
+        # bounded correction here. The provider owns retry/backoff for HTTP calls.
+        reply = complete_before(bounded_provider, messages, [], deadline)
+        try:
+            drafted = Findings.model_validate_json(reply.content).findings
+            if len({finding.id for finding in drafted}) != len(drafted):
+                raise ContractError("Finding IDs must be unique within a synthesis batch")
+            for finding in drafted:
+                if not finding.query_types or not all(
+                    value.strip()
+                    for value in (
+                        finding.pattern,
+                        finding.suggested_change,
+                        finding.counterevidence,
+                        finding.uncertainty,
+                    )
+                ):
+                    raise ContractError(
+                        "A finding needs query labels, a mechanism, and evidence limitations"
+                    )
+                if any(ref_key(ref) not in allowed_refs for ref in finding.evidence):
+                    raise ContractError(
+                        "Finding references evidence outside complete included items"
+                    )
+                cited_refs = {ref_key(ref) for ref in finding.evidence}
+                if any(
+                    not cited_refs.intersection(
+                        refs_by_query_type.get(normalize_query_type(label), set())
+                    )
+                    for label in finding.query_types
+                ):
+                    raise ContractError(
+                        "Each finding query type needs evidence from an included unit of that type"
+                    )
+                supporting = {
+                    key_for(ref.run_id)
+                    for ref in finding.evidence
+                    if ref.run_id in rows and ref.run_id in targets_by_purpose[finding.purpose]
+                }
+                minimum = settings.finding_min_support if finding.support_kind == "repeated" else 1
+                if len(supporting) < minimum:
+                    raise ContractError(
+                        "Finding lacks independent question support for its declared purpose"
+                    )
+            return drafted
+        except (ValueError, ContractError):
+            if attempt + 1 == settings.call_attempts:
+                raise
+            messages.extend(
+                [
+                    {"role": "assistant", "content": reply.content},
+                    {
+                        "role": "user",
+                        "content": (
+                            "Return only corrected findings JSON. Copy exact references and query labels from "
+                            "included items. Repeated patterns need distinct question-and-group scopes; "
+                            "isolated observations must be labelled isolated. Error repair needs evidence "
+                            "from a selected failed interaction; accepted uncertainty is fragile success, "
+                            "not an error. Unjudged uncertainty is not UC. Empty findings are valid."
+                        ),
+                    },
+                ]
+            )
+    raise ContractError("Synthesis output correction budget exhausted")
 
 
 def analyze(
@@ -604,142 +797,209 @@ def analyze(
             "jobs": len(job_ids),
         }
     )
-    failure_keys = {key_for(run_id) for run_id in failures}
-    failure_diagnoses = [d for d in diagnoses if key_for(d.run_id) in failure_keys]
-    required_failures = min(settings.analysis_min_valid, len(failure_keys))
+    targets_by_purpose = {
+        "error_repair": set(failures),
+        "uncertainty_calibration": set(calibration),
+    }
     ready = (
-        bool(failures)
-        and len(failure_diagnoses) >= required_failures
-        and len(failure_diagnoses) / len(failure_keys) >= settings.analysis_min_coverage
+        bool(job_ids)
+        and len(diagnoses) >= required
+        and len(diagnoses) / len(job_ids) >= settings.analysis_min_coverage
     )
+    query_buckets: dict[str, QueryBucket] = {}
+    bucket_units: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+    for diagnosis in diagnoses:
+        label = normalize_query_type(diagnosis.query_type)
+        bucket = query_buckets.setdefault(
+            label,
+            QueryBucket(
+                id=fingerprint({"query_type": label, "normalization": "casefold-whitespace.v1"}),
+                normalized_label=label,
+                original_labels=[],
+                diagnosis_run_ids=[],
+            ),
+        )
+        if diagnosis.query_type not in bucket.original_labels:
+            bucket.original_labels.append(diagnosis.query_type)
+        bucket.diagnosis_run_ids.append(diagnosis.run_id)
+        signal = (
+            "error_repair"
+            if diagnosis.run_id in targets_by_purpose["error_repair"]
+            else "uncertainty_calibration"
+        )
+        unit = {
+            "run_id": diagnosis.run_id,
+            "query_type": diagnosis.query_type,
+            "query_family": diagnosis.query_family,
+            "signal": signal,
+            "experience_cell": _experience_cell(
+                rows[diagnosis.run_id], settings.confidence_threshold
+            ),
+            "evidence_signals": {
+                ref.run_id: _experience_cell(rows[ref.run_id], settings.confidence_threshold)
+                for ref in diagnosis.evidence
+                if ref.run_id in rows
+            },
+            "category": diagnosis.category,
+            "cause": diagnosis.cause,
+            "condensed_rationale": diagnosis.condensed_rationale,
+            "actionable_implication": diagnosis.actionable_implication,
+            "uncertainty": diagnosis.uncertainty,
+            "evidence": [ref.model_dump() for ref in diagnosis.evidence],
+        }
+        bucket_units.setdefault(label, []).append((label, unit))
     findings = []
+    coverage.update(
+        {
+            "query_buckets": len(query_buckets),
+            "bucket_batches": 0,
+            "bucket_batches_completed": 0,
+            "synthesis_included": 0,
+            "synthesis_omitted": 0,
+            "cross_bucket_batches": 0,
+            "cross_bucket_batches_completed": 0,
+            "cross_bucket_comparison_batches": 0,
+            "cross_bucket_omitted_findings": 0,
+        }
+    )
     if ready:
         assert provider is not None
-        buckets: dict[str, list[dict[str, Any]]] = {}
-        # Evidence is admitted only with the complete diagnosis that survived
-        # context budgeting. A diagnosis may cite one of its sibling trials.
-        allowed_refs: set[str] = set()
-        supplied_ids = set()
-        synthesis = {
-            "coverage": coverage,
-            "finding_min_support": settings.finding_min_support,
-            "buckets": buckets,
-            "incomplete": incomplete,
-            "coverage_note": "Only included diagnoses support findings; omitted and unavailable runs do not.",
-        }
         system = prompt("synthesize") + "\nSchema: " + dumps(Findings.model_json_schema())
-        limit = int(settings.synthesis_max_context_chars * settings.context_trim_ratio)
-        # Admit complete condensed diagnoses, never sliced references or invented missing content.
-        for d in failure_diagnoses:
-            signal = "error_repair"
-            key = signal + "/" + d.query_family
-            unit = {
-                "run_id": d.run_id,
-                "query_type": d.query_type,
-                "query_family": d.query_family,
-                "signal": signal,
-                "category": d.category,
-                "cause": d.cause,
-                "condensed_rationale": d.condensed_rationale,
-                "actionable_implication": d.actionable_implication,
-                "uncertainty": d.uncertainty,
-                "evidence": [ref.model_dump() for ref in d.evidence],
-            }
-            buckets.setdefault(key, []).append(unit)
-            if (
-                len(
-                    dumps(
-                        [
-                            {"role": "system", "content": system},
-                            {"role": "user", "content": dumps(synthesis)},
-                        ]
-                    )
-                )
-                > limit
-            ):
-                buckets[key].pop()
-                if not buckets[key]:
-                    del buckets[key]
-                continue
-            supplied_ids.add(d.run_id)
-            allowed_refs.update(ref_key(ref) for ref in d.evidence)
-        coverage.update(
-            {
-                "synthesis_included": len(supplied_ids),
-                "synthesis_omitted": len(failure_diagnoses) - len(supplied_ids),
-            }
-        )
-        ready = (
-            len(supplied_ids) >= required_failures
-            and len(supplied_ids) / len(failure_keys) >= settings.analysis_min_coverage
-        )
-        if ready:
-            bounded_provider = stage_provider(provider, settings, "synthesis")
-            messages = [
-                {"role": "system", "content": system},
-                {"role": "user", "content": dumps(synthesis)},
-            ]
-            deadline = time.monotonic() + settings.synthesis_timeout_seconds
-            for attempt in range(settings.call_attempts):
-                reply = None
-                try:
-                    messages = trim_messages(messages, limit)
-                    if len(dumps(messages)) > settings.synthesis_max_context_chars:
-                        raise ContractError("Synthesis anchors exceed the context budget")
-                    reply = complete_before(bounded_provider, messages, [], deadline)
-                    drafted = Findings.model_validate_json(reply.content).findings
-                    if len({f.id for f in drafted}) != len(drafted):
-                        raise ContractError("Finding IDs must be unique")
-                    for finding in drafted:
-                        if any(ref_key(ref) not in allowed_refs for ref in finding.evidence):
-                            raise ContractError(
-                                "Finding references evidence outside included, inspected diagnoses"
-                            )
-                        expected_keys = (
-                            failure_keys
-                            if finding.purpose == "error_repair"
-                            else {key_for(run_id) for run_id in calibration}
-                        )
-                        supporting = {
-                            key_for(ref.run_id) for ref in finding.evidence if ref.run_id in rows
-                        } & expected_keys
-                        minimum = (
-                            settings.finding_min_support
-                            if finding.support_kind == "repeated"
-                            else 1
-                        )
-                        if len(supporting) < minimum:
-                            raise ContractError(
-                                "Finding lacks independent support for its declared purpose and pattern"
-                            )
-                    findings = drafted
-                    break
-                except (EvoGError, ValueError):
-                    if attempt + 1 == settings.call_attempts:
-                        ready = False
-                        incomplete["synthesis"] = (
-                            "Synthesis unavailable or failed evidence/support validation"
-                        )
-                    else:
-                        messages.append(
-                            {
-                                "role": "assistant",
-                                "content": reply.content if reply is not None else "",
-                            }
-                        )
-                        messages.append(
-                            {
-                                "role": "user",
-                                "content": "Return only corrected findings JSON. Copy exact references from included diagnoses. "
-                                "Repeated patterns need distinct question-and-authorized-group scopes; "
-                                "repeated trials of one question count once and isolated observations must be labelled isolated. "
-                                "Do not treat uncertainty in an accepted answer as an observed error. Empty findings are valid.",
-                            }
-                        )
-        else:
-            incomplete["synthesis_context"] = (
-                "Insufficient valid coverage after context-bounded inclusion"
+        completed_diagnoses: set[str] = set()
+        cross_units_by_bucket: list[list[tuple[str, dict[str, Any]]]] = []
+        for label, units in bucket_units.items():
+            bucket = query_buckets[label]
+            batches, omitted = _synthesis_batches(
+                "bucket", units, coverage, incomplete, settings, system
             )
+            coverage["bucket_batches"] += len(batches)
+            for _, unit in omitted:
+                incomplete[f"synthesis_context:{unit['run_id']}"] = (
+                    "Complete diagnosis exceeds a synthesis batch context budget"
+                )
+                coverage["synthesis_omitted"] += 1
+            cross_units = []
+            for index, batch in enumerate(batches):
+                try:
+                    bucket_findings = _synthesize_batch(
+                        provider,
+                        settings,
+                        "bucket",
+                        batch,
+                        coverage,
+                        incomplete,
+                        system,
+                        rows,
+                        targets_by_purpose,
+                        key_for,
+                    )
+                except (EvoGError, ValueError):
+                    incomplete[f"bucket:{bucket.id}:{index}"] = (
+                        "Bucket synthesis unavailable or failed evidence/support validation"
+                    )
+                    coverage["synthesis_omitted"] += len(batch)
+                    continue
+                coverage["bucket_batches_completed"] += 1
+                completed_diagnoses.update(unit["run_id"] for _, unit in batch)
+                for finding in bucket_findings:
+                    # Intermediate IDs are namespaced; final model finding IDs stay
+                    # compatible with existing consumers when there is one batch.
+                    finding = finding.model_copy(update={"id": f"{bucket.id}:{index}:{finding.id}"})
+                    bucket.findings.append(finding)
+                    evidence_signals = {
+                        ref.run_id: _experience_cell(
+                            rows[ref.run_id], settings.confidence_threshold
+                        )
+                        for ref in finding.evidence
+                        if ref.run_id in rows
+                    }
+                    experience_cells = sorted(set(evidence_signals.values()))
+                    cross_units.append(
+                        (
+                            label,
+                            {
+                                "id": finding.id,
+                                "query_type": bucket.original_labels[0],
+                                "query_types": finding.query_types,
+                                "signal": finding.purpose,
+                                "experience_cell": experience_cells[0]
+                                if len(experience_cells) == 1
+                                else "mixed",
+                                "experience_cells": experience_cells,
+                                "evidence_signals": evidence_signals,
+                                "condensed_rationale": finding.pattern,
+                                "actionable_implication": finding.suggested_change,
+                                "counterevidence": finding.counterevidence,
+                                "uncertainty": finding.uncertainty,
+                                "support_kind": finding.support_kind,
+                                "evidence": [ref.model_dump() for ref in finding.evidence],
+                            },
+                        )
+                    )
+            cross_units_by_bucket.append(cross_units)
+        coverage["synthesis_included"] = len(completed_diagnoses)
+        # Interleave bucket findings so bounded cross-bucket batches compare
+        # different semantic types whenever the context admits both.
+        cross_units = []
+        for index in range(max((len(units) for units in cross_units_by_bucket), default=0)):
+            cross_units.extend(
+                units[index] for units in cross_units_by_bucket if index < len(units)
+            )
+        cross_batches, cross_omitted = _synthesis_batches(
+            "cross_bucket", cross_units, coverage, incomplete, settings, system
+        )
+        coverage["cross_bucket_batches"] = len(cross_batches)
+        coverage["cross_bucket_omitted_findings"] = len(cross_omitted)
+        for _, unit in cross_omitted:
+            incomplete[f"cross_bucket_context:{unit['id']}"] = (
+                "Complete bucket finding exceeds a synthesis batch context budget"
+            )
+        for index, batch in enumerate(cross_batches):
+            try:
+                final_findings = _synthesize_batch(
+                    provider,
+                    settings,
+                    "cross_bucket",
+                    batch,
+                    coverage,
+                    incomplete,
+                    system,
+                    rows,
+                    targets_by_purpose,
+                    key_for,
+                )
+            except (EvoGError, ValueError):
+                incomplete[f"cross_bucket:{index}"] = (
+                    "Cross-bucket synthesis unavailable or failed evidence/support validation"
+                )
+                continue
+            coverage["cross_bucket_batches_completed"] += 1
+            coverage["cross_bucket_comparison_batches"] += int(
+                len({label for label, _ in batch}) > 1
+            )
+            for finding in final_findings:
+                if len(cross_batches) > 1:
+                    finding = finding.model_copy(update={"id": f"cross:{index}:{finding.id}"})
+                findings.append(finding)
+        ready = (
+            len(completed_diagnoses) >= required
+            and len(completed_diagnoses) / len(job_ids) >= settings.analysis_min_coverage
+            and not cross_omitted
+            and coverage["cross_bucket_batches_completed"] == len(cross_batches)
+        )
+        if any(
+            key.startswith(
+                ("bucket:", "cross_bucket:", "synthesis_context:", "cross_bucket_context:")
+            )
+            for key in incomplete
+        ):
+            incomplete["synthesis"] = (
+                "Some synthesis inputs or batches are unavailable; inspect scoped reasons and coverage"
+            )
+    else:
+        coverage["synthesis_omitted"] = len(diagnoses)
+        if diagnoses:
+            incomplete["synthesis_coverage"] = "Insufficient valid diagnosis coverage for synthesis"
     report = AnalysisReport(
         id=uuid4().hex,
         revision_id=revision_id,
@@ -752,6 +1012,9 @@ def analyze(
         failure_run_ids=failures,
         calibration_run_ids=calibration,
         eligible_for_revision=ready,
+        schema_version="evog.analysis.v2",
+        query_type_normalization="casefold-whitespace.v1",
+        query_buckets=list(query_buckets.values()),
     )
     store.save_artifact(report.id, "analysis", report.model_dump(mode="json"))
     return report

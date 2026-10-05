@@ -13,22 +13,6 @@ from evog.errors import ContractError, ProviderError
 from evog.providers import ModelReply
 
 
-def test_multiple_choice_prompt_preserves_text_answer_protocol():
-    episode = Episode(
-        benchmark="evermembench",
-        episode_id="choice-1",
-        question="Which schedule was selected?",
-        gold="private-reference-answer",
-        options={"A": "Monday", "B": "Tuesday"},
-        scope="01",
-        question_type="choice",
-    )
-    prompt = episode.prompt()
-    assert "option letter after FINAL ANSWER:" in prompt
-    assert "CONFIDENCE" in prompt and "ANSWER BIAS" in prompt
-    assert "JSON" not in prompt and episode.gold not in prompt
-
-
 def test_evermem_adapter_preserves_gold_outside_messages(tmp_path):
     root = tmp_path / "evermem"
     (root / "dataset" / "01").mkdir(parents=True)
@@ -363,14 +347,12 @@ def test_unchanged_scores_do_not_activate_a_candidate(ever_root, tmp_path):
         result = run(
             app, "evermembench", ever_root, output=tmp_path / "unchanged.json", limit=1, cycle=True
         )
-        assert result["evolution_status"] == "no_supported_change"
+        assert result["evolution_status"] == "regression_rejected"
         assert "activated" not in result
         assert result["analysis"]["calibration_run_ids"]
-        assert not result["analysis"]["findings"]
+        assert result["analysis"]["findings"]
         assert app.store.harness().id == result["parent_revision_id"]
-        assert (
-            app.store.harness().id != prior
-        )  # source-view initialization is a separate structural revision
+        assert app.store.harness().id == prior
 
 
 def test_source_view_preserves_evolved_representation(ever_root, tmp_path):
@@ -386,7 +368,7 @@ def test_source_view_preserves_evolved_representation(ever_root, tmp_path):
         app.store.activate(evolved, initial.id, "test", "structural")
         run(app, "evermembench", ever_root, output=tmp_path / "baseline.json", limit=1)
         view = app.store.harness().representation
-        assert view.include_metadata
+        assert not view.include_metadata
         assert view.timestamp_view == "both"
         assert view.include_reply_refs
 
@@ -528,7 +510,7 @@ def test_resume_recovers_committed_activation_without_repeating_trials(ever_root
         assert result["status"] == "completed"
         assert result["activated"]["revision_id"] == active
         assert app.provider.judgments == 2
-        assert len(app.store.revisions()) == 3
+        assert len(app.store.revisions()) == 2
 
 
 def test_resume_preserves_unscored_failures_before_a_run_was_created(

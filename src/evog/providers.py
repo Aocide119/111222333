@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from threading import BoundedSemaphore
 from typing import Any, Protocol
 
 import httpx
@@ -24,6 +25,8 @@ class ModelReply(Record):
     content: str = Field(default="", max_length=256000)
     tool_calls: list[ToolCall] = Field(default_factory=list, max_length=16)
     usage: dict[str, int] = Field(default_factory=dict)
+    response_model: str = Field(default="", max_length=512)
+    http_attempts: int = Field(default=1, ge=1)
 
 
 class Provider(Protocol):
@@ -33,14 +36,46 @@ class Provider(Protocol):
 
 
 def stage_provider(provider: Provider, settings: Settings, stage: str) -> Provider:
-    """Use independent output budgets while retaining the same endpoint and reasoning flags."""
+    """Apply stage budgets and sampling while retaining the campaign backbone."""
     if isinstance(provider, ChatProvider):
         token_field = f"{stage}_max_output_tokens"
+        temperature = getattr(settings, f"{stage}_temperature", None)
         bounded = settings.model_copy(
-            update={"max_output_tokens": getattr(settings, token_field, settings.max_output_tokens)}
+            update={
+                "max_output_tokens": getattr(settings, token_field, settings.max_output_tokens),
+                "temperature": settings.temperature if temperature is None else temperature,
+                "call_retry_backoff_seconds": (
+                    settings.analysis_retry_backoff_seconds
+                    if stage in {"analysis", "synthesis"}
+                    else settings.call_retry_backoff_seconds
+                ),
+            }
         )
         return ChatProvider(bounded, client=provider.client)
     return provider
+
+
+class ConcurrentProvider:
+    """Bound independently issued judge requests, including the waiting deadline."""
+
+    def __init__(self, provider: Provider, concurrency: int):
+        self.provider = provider
+        self._slots = BoundedSemaphore(concurrency)
+
+    def complete(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> ModelReply:
+        with self._slots:
+            return self.provider.complete(messages, tools)
+
+    def complete_before(
+        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]], *, deadline: float
+    ) -> ModelReply:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or not self._slots.acquire(timeout=remaining):
+            raise DeadlineExceeded("Judge deadline reached while waiting for a request slot")
+        try:
+            return complete_before(self.provider, messages, tools, deadline)
+        finally:
+            self._slots.release()
 
 
 def complete_before(
@@ -106,6 +141,10 @@ class ChatProvider:
         }
         if tools:
             payload["tools"] = tools
+        if self.settings.temperature is not None:
+            payload["temperature"] = self.settings.temperature
+        if self.settings.sampling_seed is not None:
+            payload["seed"] = self.settings.sampling_seed
         if self.settings.reasoning_effort is not None:
             payload["reasoning_effort"] = self.settings.reasoning_effort
             # Several OpenAI-compatible gateways use Anthropic-style thinking
@@ -115,6 +154,15 @@ class ChatProvider:
             # and stage providers).
             if self.settings.reasoning_effort == "none":
                 payload["thinking"] = {"type": "disabled"}
+
+        def backoff(attempt: int) -> None:
+            delay = self.settings.call_retry_backoff_seconds * (2**attempt)
+            if deadline is not None and delay >= deadline - time.monotonic():
+                raise DeadlineExceeded("Request deadline reached before retry")
+            if delay:
+                time.sleep(delay)
+
+        # One transport layer owns retries; stage callers must not retry ProviderError.
         for attempt in range(self.settings.call_attempts):
             timeout = min(self.settings.request_timeout, self.settings.call_timeout_seconds)
             if deadline is not None:
@@ -136,6 +184,7 @@ class ChatProvider:
                     isinstance(exc, httpx.TimeoutException)
                     and attempt + 1 < self.settings.call_attempts
                 ):
+                    backoff(attempt)
                     continue
                 raise ProviderError("Provider transport failed") from exc
             if deadline is not None and time.monotonic() >= deadline:
@@ -144,10 +193,7 @@ class ChatProvider:
                 response.status_code in (429, 500, 502, 503, 504)
                 and attempt + 1 < self.settings.call_attempts
             ):
-                delay = 0.5 * (2**attempt)
-                if deadline is not None and delay >= deadline - time.monotonic():
-                    raise DeadlineExceeded("Question deadline reached")
-                time.sleep(delay)
+                backoff(attempt)
                 continue
             if response.is_error:
                 raise ProviderError(f"Provider request failed (HTTP {response.status_code})")
@@ -169,7 +215,23 @@ class ChatProvider:
                     for key, value in (data.get("usage") or {}).items()
                     if key in ("prompt_tokens", "completion_tokens", "total_tokens")
                 }
-                return ModelReply(content=raw.get("content") or "", tool_calls=calls, usage=usage)
+                for detail_key, counter in (
+                    ("prompt_tokens_details", "cached_tokens"),
+                    ("completion_tokens_details", "reasoning_tokens"),
+                ):
+                    value = (data.get("usage") or {}).get(detail_key, {})
+                    if isinstance(value, dict) and type(value.get(counter)) is int:
+                        usage["cached_prompt_tokens" if counter == "cached_tokens" else counter] = (
+                            value[counter]
+                        )
+                returned_model = data.get("model", "")
+                return ModelReply(
+                    content=raw.get("content") or "",
+                    tool_calls=calls,
+                    usage=usage,
+                    response_model=returned_model if isinstance(returned_model, str) else "",
+                    http_attempts=attempt + 1,
+                )
             except (KeyError, IndexError, TypeError, ValueError, AttributeError) as exc:
                 raise ProviderError("Provider returned an invalid chat response") from exc
         raise ProviderError("Provider retry budget exhausted")

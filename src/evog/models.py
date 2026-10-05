@@ -122,6 +122,13 @@ class Diagnosis(Record):
     evidence: list[EvidenceRef] = Field(min_length=1)
     uncertainty: str = Field(min_length=1, max_length=1600)
 
+    @field_validator("query_type")
+    @classmethod
+    def nonblank_query_type(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("query_type must contain a semantic query label")
+        return value
+
 
 class Finding(Record):
     id: str = Field(min_length=1)
@@ -133,6 +140,16 @@ class Finding(Record):
     uncertainty: str
     purpose: Literal["error_repair", "uncertainty_calibration"] = "error_repair"
     support_kind: Literal["repeated", "isolated"] = "repeated"
+
+
+class QueryBucket(Record):
+    """An open query-type bucket, including its original labels and inspected inputs."""
+
+    id: str
+    normalized_label: str
+    original_labels: list[str]
+    diagnosis_run_ids: list[str]
+    findings: list[Finding] = Field(default_factory=list)
 
 
 class AnalysisReport(Record):
@@ -147,6 +164,9 @@ class AnalysisReport(Record):
     failure_run_ids: list[str] = Field(default_factory=list)
     calibration_run_ids: list[str] = Field(default_factory=list)
     eligible_for_revision: bool = True
+    schema_version: str = "evog.analysis.v1"
+    query_type_normalization: str | None = None
+    query_buckets: list[QueryBucket] = Field(default_factory=list)
 
 
 Interface = Literal["Representation", "Operation", "Policy", "Intervention"]

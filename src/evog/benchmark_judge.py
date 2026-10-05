@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from threading import Event
 
 from evog.benchmark_data import Episode
-from evog.errors import ProviderError
-from evog.providers import Provider
+from evog.errors import DeadlineExceeded, ProviderError
+from evog.providers import Provider, complete_before
 
 
 def parse_mc_letter(response: str) -> str:
@@ -74,7 +75,12 @@ def parse_groupmem(content: str) -> bool | None:
 
 
 def score(
-    provider: Provider, episode: Episode, answer: str, *, cancel_event: Event | None = None
+    provider: Provider,
+    episode: Episode,
+    answer: str,
+    *,
+    cancel_event: Event | None = None,
+    timeout_seconds: float = 120,
 ) -> dict:
     if cancel_event is not None and cancel_event.is_set():
         return {"passed": None, "status": "cancelled", "usage": {}}
@@ -95,26 +101,54 @@ def score(
     )
     parser = parse_evermem if prefix == "EVERMEM" else parse_groupmem
     usage: dict[str, int] = {}
+    usage_calls: list[dict[str, int]] = []
+    response_models: list[str] = []
+    http_attempts = 0
     raw = ""
+    deadline = time.monotonic() + timeout_seconds
     for attempt in range(1, 4):
         if cancel_event is not None and cancel_event.is_set():
-            return {"passed": None, "status": "cancelled", "usage": usage}
+            return {
+                "passed": None,
+                "status": "cancelled",
+                "usage": usage,
+                "usage_calls": usage_calls,
+                "usage_complete": False,
+            }
         try:
-            reply = provider.complete(
-                [{"role": "system", "content": system}, {"role": "user", "content": user}], []
+            reply = complete_before(
+                provider,
+                [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                [],
+                deadline,
             )
-        except ProviderError:
+        except (ProviderError, DeadlineExceeded) as exc:
             return {
                 "mode": "official_llm_judge",
                 "passed": None,
-                "status": "judge_unavailable",
+                "status": "judge_timeout"
+                if isinstance(exc, DeadlineExceeded)
+                else "judge_unavailable",
+                "attempts": attempt,
                 "usage": usage,
+                "usage_calls": usage_calls,
+                "usage_complete": False,
+                "reported_http_attempts_before_failure": http_attempts,
             }
         raw = reply.content
+        usage_calls.append(reply.usage)
+        response_models.append(reply.response_model)
+        http_attempts += reply.http_attempts
         for key, value in reply.usage.items():
             usage[key] = usage.get(key, 0) + value
         if cancel_event is not None and cancel_event.is_set():
-            return {"passed": None, "status": "cancelled", "usage": usage}
+            return {
+                "passed": None,
+                "status": "cancelled",
+                "usage": usage,
+                "usage_calls": usage_calls,
+                "usage_complete": True,
+            }
         passed = parser(raw)
         if passed is not None:
             return {
@@ -123,6 +157,10 @@ def score(
                 "raw": raw,
                 "attempts": attempt,
                 "usage": usage,
+                "usage_calls": usage_calls,
+                "usage_complete": True,
+                "http_attempts": http_attempts,
+                "response_models": response_models,
             }
     return {
         "mode": "official_llm_judge",
@@ -131,6 +169,10 @@ def score(
         "raw": raw,
         "attempts": 3,
         "usage": usage,
+        "usage_calls": usage_calls,
+        "usage_complete": True,
+        "http_attempts": http_attempts,
+        "response_models": response_models,
     }
 
 

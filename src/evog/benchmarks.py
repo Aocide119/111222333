@@ -15,10 +15,12 @@ from evog import analysis, evolution
 from evog.app import Application
 from evog.benchmark_data import BenchmarkName, Corpus, Episode, load_corpus, load_episodes
 from evog.benchmark_judge import score
+from evog.benchmark_metrics import research_metrics, token_total
 from evog.config import Settings
-from evog.errors import ContractError, EvoGError, RunFailed
+from evog.errors import ContractError, EvoGError, ProviderError, RunFailed
 from evog.harness import Harness
 from evog.io import atomic_write, dumps, fingerprint
+from evog.memory import MemoryRound
 from evog.models import AnalysisReport, AppliedRevision, EvolutionPlan
 from evog.runtime import interact
 
@@ -179,6 +181,8 @@ def _evaluate_one(
     feedback: bool,
     cancel_event: Event | None,
     trial_index: int = 1,
+    memory_round: MemoryRound | None = None,
+    run_started: Callable[[str, str], None] | None = None,
 ) -> dict:
     started = time.monotonic()
     row: dict[str, Any] = {
@@ -200,6 +204,12 @@ def _evaluate_one(
             memory_session=f"{batch_id}/{stage}/{episode.episode_id}/{trial_index}/{uuid4().hex}",
             isolated_long_term=True,
             cancel_event=cancel_event,
+            frozen_memory=memory_round.binding(corpora[episode.scope].group_ids, episode.episode_id)
+            if memory_round
+            else None,
+            run_started=(lambda run_id: run_started(episode.episode_id, run_id))
+            if run_started
+            else None,
         )
         row.update(
             {
@@ -208,16 +218,34 @@ def _evaluate_one(
                 "status": "completed",
             }
         )
-        judged = (
-            score(app.provider, episode, answer.text, cancel_event=cancel_event)
-            if cancel_event is None or not cancel_event.is_set()
-            else {"passed": None, "status": "cancelled", "usage": {}}
-        )
+        judge_started = time.monotonic()
+        try:
+            judged = (
+                score(
+                    app.provider if episode.options else app.judge_provider,
+                    episode,
+                    answer.text,
+                    cancel_event=cancel_event,
+                    timeout_seconds=app.settings.judge_timeout_seconds,
+                )
+                if cancel_event is None or not cancel_event.is_set()
+                else {"passed": None, "status": "cancelled", "usage": {}}
+            )
+        except ProviderError:
+            judged = {"passed": None, "status": "judge_unavailable", "usage": {}}
+        row["judge_seconds"] = round(time.monotonic() - judge_started, 3)
         row.update(
             {
                 "passed": judged["passed"],
                 "judge": judged,
                 "judge_usage": judged.get("usage", {}),
+                "judge_tokens": (
+                    0
+                    if episode.options
+                    else _measured_tokens(judged.get("usage_calls", []))
+                    if judged.get("usage_complete")
+                    else None
+                ),
             }
         )
         if (
@@ -242,14 +270,51 @@ def _evaluate_one(
         row.update({"status": "failed", "error": str(exc)})
     events = app.store.events(row["run_id"]) if row.get("run_id") else []
     usage: dict[str, int] = {}
+    answer_usage: dict[str, int] = {}
+    reflection_usage: dict[str, int] = {}
     for event in events:
-        if event.kind in ("model", "reflection"):
+        if event.kind in ("model", "reflection") or (
+            event.kind == "error" and event.data.get("code") == "reflection_unavailable"
+        ):
             for key, value in event.data.get("usage", {}).items():
                 usage[key] = usage.get(key, 0) + value
+                stage_usage = answer_usage if event.kind == "model" else reflection_usage
+                stage_usage[key] = stage_usage.get(key, 0) + value
+    model_costs = [event.data.get("usage", {}) for event in events if event.kind == "model"]
+    reflection_events = [
+        event
+        for event in events
+        if event.kind == "reflection"
+        or (event.kind == "error" and event.data.get("code") == "reflection_unavailable")
+    ]
     row.update(
         {
             "seconds": round(time.monotonic() - started, 3),
             "agent_usage": usage,
+            "answer_usage": answer_usage,
+            "reflection_usage": reflection_usage,
+            "answer_tokens": _measured_tokens(model_costs),
+            "answer_usage_call_count": len(model_costs),
+            "reflection_tokens": _measured_tokens(
+                [e.data.get("usage", {}) for e in reflection_events]
+            )
+            if all(e.data.get("usage_complete", True) for e in reflection_events)
+            else None,
+            "reflection_usage_call_count": len(reflection_events),
+            "answer_seconds": next(
+                (
+                    event.data["elapsed_seconds"]
+                    for event in events
+                    if event.kind == "budget" and event.data.get("phase") == "answered"
+                ),
+                None,
+            ),
+            "reflection_seconds": sum(
+                event.data.get("seconds", 0)
+                for event in events
+                if event.kind == "reflection"
+                or (event.kind == "error" and event.data.get("code") == "reflection_unavailable")
+            ),
             "tool_calls": sum(
                 event.kind == "tool" and event.data.get("executed", True) for event in events
             ),
@@ -263,7 +328,24 @@ def _evaluate_one(
             ),
         }
     )
+    app.store.save_artifact(
+        fingerprint(
+            {
+                "batch_id": batch_id,
+                "stage": stage,
+                "episode_id": episode.episode_id,
+                "trial_index": trial_index,
+            }
+        ),
+        "benchmark_trial_result",
+        row,
+    )
     return row
+
+
+def _measured_tokens(calls: list[dict[str, int]]) -> int | None:
+    totals = [token_total(usage) for usage in calls]
+    return sum(totals) if all(total is not None for total in totals) else None
 
 
 def evaluate(
@@ -279,12 +361,32 @@ def evaluate(
     checkpoint: Callable[[list[dict]], None],
     trials: int = 1,
     initial: list[dict] | None = None,
+    memory_round: MemoryRound | None = None,
+    run_started: Callable[[str, str], None] | None = None,
 ) -> list[dict]:
     if not 1 <= trials <= 10:
         raise ContractError("Trials per question must be within 1–10")
     jobs = [(e, i) for e in episodes for i in range(1, trials + 1)]
     positions = {(e.episode_id, i): n for n, (e, i) in enumerate(jobs)}
     results = list(initial or [])
+    existing_keys = {_trial_key(row) for row in results}
+    for episode, trial in jobs:
+        key = (episode.episode_id, trial)
+        if key in existing_keys:
+            continue
+        identity = fingerprint(
+            {
+                "batch_id": batch_id,
+                "stage": stage,
+                "episode_id": episode.episode_id,
+                "trial_index": trial,
+            }
+        )
+        try:
+            cached = app.store.artifact(identity, "benchmark_trial_result")
+        except ContractError:
+            continue
+        results.append(cached)
     for row in results:
         if (
             not isinstance(row, dict)
@@ -312,6 +414,8 @@ def evaluate(
     completed_keys = {_trial_key(r) for r in results}
     if len(completed_keys) != len(results) or not completed_keys.issubset(positions):
         raise ContractError("Checkpoint has duplicate or unknown trials")
+    results.sort(key=lambda r: positions[_trial_key(r)])
+    checkpoint(list(results))
     jobs = [(e, i) for e, i in jobs if (e.episode_id, i) not in completed_keys]
     cancel = Event()
 
@@ -328,6 +432,8 @@ def evaluate(
             feedback=feedback,
             cancel_event=cancel,
             trial_index=trial_index,
+            memory_round=memory_round,
+            run_started=run_started,
         )
 
     def record(row: dict) -> None:
@@ -418,7 +524,7 @@ def run(
         )
         if {row.episode_id for row in episodes} & {row.episode_id for row in validation}:
             raise ContractError("Validation and evolution episode IDs must be disjoint")
-    deployment_settings = app.settings.model_dump(mode="json", exclude={"api_key"})
+    deployment_settings = app.settings.model_dump(mode="json", exclude={"api_key", "judge_api_key"})
     runtime_source = {
         path.relative_to(Path(__file__).parent).as_posix(): path.read_text(encoding="utf-8")
         for path in sorted(Path(__file__).parent.rglob("*"))
@@ -493,16 +599,8 @@ def run(
         progress(
             f"Imported {scope}: {len(corpus.messages)} messages / {len(corpus.group_ids)} groups"
         )
-    # Include source attribution and domain metadata in the evaluation harness.
+    # Evaluate the explicit starting harness without mutating its representation.
     active = app.store.harness(payload.get("parent_revision_id")) if resume else app.store.harness()
-    if not active.representation.include_metadata:
-        contents = dict(active.contents)
-        contents["representation.json"] = dumps(
-            active.representation.model_copy(update={"include_metadata": True}).model_dump()
-        )
-        source_view = Harness(contents)
-        app.store.activate(source_view, active.id, "benchmark-source-view", "structural")
-        active = source_view
     payload["parent_revision_id"] = active.id
 
     def execute(
@@ -513,6 +611,10 @@ def run(
 
         def checkpoint(rows: list[dict]) -> None:
             payload[stage] = {"results": rows, "metrics": metrics(rows)}
+            if trials == 1:
+                payload[stage]["research_metrics"] = research_metrics(
+                    rows, [episode.episode_id for episode in selected]
+                )
             _write(output, payload)
 
         return evaluate(
@@ -680,6 +782,15 @@ def run(
                         )
                 experience = before = after
             _write(output, payload)
-    payload["status"] = "completed"
+    payload["status"] = (
+        "incomplete"
+        if any(
+            isinstance(value, dict)
+            and "research_metrics" in value
+            and not value["research_metrics"]["report_complete"]
+            for value in payload.values()
+        )
+        else "completed"
+    )
     _write(output, payload)
     return payload

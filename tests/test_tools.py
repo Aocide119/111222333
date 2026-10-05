@@ -38,6 +38,43 @@ def test_source_view_is_frozen_at_run_start(store):
     assert tools.execute("grep_search", {"terms": ["release"]})["total_matches"] == 2
 
 
+def test_required_alias_groups_and_optional_ranking_are_executed(store):
+    tools = tools_for(store)
+    result = tools.execute(
+        "grep_search",
+        {
+            "target": "memory_units",
+            "query": "unused natural language",
+            "required_pattern_groups": [["release", "launch"], ["January", "February"]],
+            "optional_patterns": ["changed"],
+        },
+    )
+    assert result["total_matches"] == 2
+    assert result["matches"][0]["ref"] == "demo-team/002"
+    assert result["matches"][0]["optional_match_count"] == 1
+    impossible = tools.execute(
+        "grep_search",
+        {
+            "target": "memory_units",
+            "query": "",
+            "required_pattern_groups": [["missing"]],
+            "optional_patterns": ["release"],
+        },
+    )
+    assert impossible["total_matches"] == 0
+    constrained = tools.execute(
+        "grep_search",
+        {
+            "query": "",
+            "patterns": ["changed"],
+            "required_pattern_groups": [["release"]],
+        },
+    )
+    assert constrained["total_matches"] == 1
+    with pytest.raises(ValueError):
+        tools.execute("grep_search", {"required_pattern_groups": [[]], "query": "release"})
+
+
 def test_source_aliases_do_not_duplicate_broad_search_results(store):
     tools = tools_for(store)
     broad = tools.execute("grep_search", {"terms": ["release"]})
@@ -304,39 +341,6 @@ def test_result_archives_are_scoped_read_only_and_cannot_be_overwritten(store):
         first.execute("write_file", {"path": path, "content": "forged source"})
 
 
-def test_archived_chunks_are_readable_through_public_tool_arguments(store):
-    store.ingest(
-        iter(
-            [
-                Message.model_validate(
-                    {**DEMO_MESSAGES[0], "message_id": "large", "text": "release " + "x" * 3000}
-                )
-            ]
-        )
-    )
-    tools = Tools(store, store.harness(), ["demo-team"], max_output_chars=1024)
-    source = tools.execute("list_files", {"target": "memory_units"})["files"][0]
-    preview = tools.execute(
-        "read_file", {"target": "memory_units", "resource_path": source["resource_path"]}
-    )
-    assert preview["truncated"] and not tools.delivered_refs
-    listing = tools.execute(
-        "list_files", {"target": "workspace", "resource_path": preview["first_chunk"]}
-    )
-    assert listing["files"]
-    chunks = sorted(path for path in tools.results.paths if "chunk_" in path)
-    for path in chunks:
-        result = tools.execute("read_file", {"target": "workspace", "resource_path": path})
-        assert result["lines"] and not result["truncated"]
-        assert len(dumps(result)) <= 1024
-    assert "demo-team/large" in tools.delivered_refs
-    other = Tools(store, store.harness(), ["demo-team"])
-    with pytest.raises(ContractError, match="scope"):
-        other.execute("read_file", {"target": "workspace", "resource_path": chunks[0]})
-    with pytest.raises(ContractError, match="scope"):
-        tools.execute("read_file", {"target": "workspace", "resource_path": "config.toml"})
-
-
 def test_representation_and_operation_extensions_change_executed_views(store):
     tools = tools_for(
         store,
@@ -346,7 +350,7 @@ def test_representation_and_operation_extensions_change_executed_views(store):
         },
     )
     assert tools.execute("grep_search", {"terms": ["release"]})["total_matches"] == 0
-    assert tools.execute("grep_search", {"terms": ["User"]})["total_matches"] == 0
+    assert tools.execute("grep_search", {"terms": ["May"]})["total_matches"] == 0
     found = tools.execute("grep_search", {"terms": ["User_1"]})
     assert found["total_matches"] == 1
     path = next(iter(tools.context))

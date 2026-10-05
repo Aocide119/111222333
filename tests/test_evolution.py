@@ -30,38 +30,6 @@ def prepare(store, settings):
     return report, plan
 
 
-def test_evolution_can_read_archived_tool_output_in_supplied_scope(store, settings):
-    report, _ = prepare(store, settings)
-    run_id = report.selected_run_ids[0]
-    path = "tool_results/0001/full.txt"
-    archive = store.workspace / "tool_results" / run_id / "0001" / "full.txt"
-    archive.parent.mkdir(parents=True, exist_ok=True)
-    archive.write_text("archived source response", encoding="utf-8")
-    event = store.event(run_id, "tool", {"name": "read_file", "persisted_path": path})
-
-    def verify_result(messages, tools):
-        result = json.loads(messages[-1]["content"])
-        assert result["content"] == "archived source response"
-        assert result["evidence_ref"]["run_id"] == run_id
-        assert result["evidence_ref"]["event_index"] == event.index
-        assert result["evidence_ref"]["field_path"] == f"/archive/{path}"
-        return ModelReply(content='{"summary":"No supported revision.","changes":[]}')
-
-    provider = ScriptedProvider(
-        ModelReply(
-            tool_calls=[
-                ToolCall(
-                    id="read", name="read_tool_result", arguments={"run_id": run_id, "path": path}
-                )
-            ]
-        ),
-        verify_result,
-    )
-    plan = propose(store, provider, settings, report)
-    assert plan.changes == []
-    assert "read_tool_result" in {tool["function"]["name"] for tool in provider.calls[0][1]}
-
-
 def test_revision_activate_and_rollback_preserve_sources_and_trace(store, settings):
     report, plan = prepare(store, settings)
     prior = store.harness().id

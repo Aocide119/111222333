@@ -190,10 +190,11 @@ def propose(
             "diagnoses": [diagnosis.model_dump() for diagnosis in report.diagnoses],
             "eligible_for_revision": report.eligible_for_revision,
             "coverage": report.coverage,
-            "finding_min_support": settings.finding_min_support,
             "incomplete": report.incomplete,
+            "finding_min_support": settings.finding_min_support,
             "history": store.revisions(),
             "evaluations": store.artifacts("evaluation", limit=10),
+            "campaign_history": store.artifacts("research_round_evaluation", limit=100),
             "best_ever": store.artifacts("best_ever", limit=10),
             "change_manifests": store.artifacts("change_manifest", limit=10),
             "activation_outcomes": store.artifacts("activation_outcome", limit=10),
@@ -216,6 +217,7 @@ def propose(
         for key in (
             "failed_proposals",
             "evaluations",
+            "campaign_history",
             "activation_outcomes",
             "best_ever",
             "change_manifests",
@@ -258,7 +260,7 @@ def propose(
         ]
         trace_access = None
         deadline = time.monotonic() + settings.evolution_timeout_seconds
-        invalid = provider_failures = 0
+        invalid = 0
         for turn in range(settings.evolution_turns):
             messages = trim_messages(messages, limit)
             available = (
@@ -267,7 +269,6 @@ def propose(
             try:
                 reply = complete_before(provider, messages, available, deadline)
             except ProviderError as exc:
-                provider_failures += 1
                 store.save_artifact(
                     uuid4().hex,
                     "proposal_attempt",
@@ -277,12 +278,8 @@ def propose(
                         "error": _error_summary(exc),
                     },
                 )
-                if (
-                    provider_failures >= settings.call_attempts
-                    or turn == settings.evolution_turns - 1
-                ):
-                    raise
-                continue
+                # Transport owns retries; another stage retry multiplies its budget.
+                raise
             messages.append(assistant_message(reply))
             if reply.tool_calls:
                 for i, call in enumerate(reply.tool_calls):

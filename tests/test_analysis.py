@@ -235,7 +235,11 @@ def test_partial_diagnosis_failure_preserves_sufficient_valid_coverage(
         "uncertainty": "limited coverage",
     }
     report = analyze(
-        store, ScriptedProvider(ModelReply(content=json.dumps({"findings": [finding]}))), settings
+        store,
+        ScriptedProvider(
+            *(ModelReply(content=json.dumps({"findings": [finding]})) for _ in range(2))
+        ),
+        settings,
     )
     assert report.incomplete and report.eligible_for_revision
     assert report.coverage["valid"] == 2 and len(report.findings) == 1
@@ -335,8 +339,7 @@ def test_synthesis_rejects_evidence_from_context_omitted_diagnosis(store, settin
     monkeypatch.setattr("evog.analysis.diagnose", diagnosed)
     settings.analysis_min_valid = 1
     settings.analysis_min_coverage = 0.5
-    # Allow one complete diagnosis plus the system/schema anchors, but not both.
-    settings.synthesis_max_context_chars = 9000
+    settings.synthesis_max_context_chars = 8000
     ordered = select_experience(store, settings, store.harness().id)["selected"]
     omitted_ref = {
         "run_id": ordered[-1],
@@ -355,17 +358,11 @@ def test_synthesis_rejects_evidence_from_context_omitted_diagnosis(store, settin
         "uncertainty": "unknown",
         "support_kind": "isolated",
     }
-
-    def return_omitted_finding(messages, tools):
-        supplied = json.loads(messages[1]["content"])
-        included = [unit for bucket in supplied["buckets"].values() for unit in bucket]
-        assert len(included) == 1
-        assert included[0]["run_id"] != omitted_ref["run_id"]
-        return ModelReply(content=json.dumps({"findings": [finding]}))
-
     report = analyze(
         store,
-        ScriptedProvider(*(return_omitted_finding for _ in range(3))),
+        ScriptedProvider(
+            *(ModelReply(content=json.dumps({"findings": [finding]})) for _ in range(3))
+        ),
         settings,
     )
     assert not report.findings
@@ -501,7 +498,9 @@ def test_demo_analysis_inspects_evidence_and_preserves_findings(store, settings)
     answer = interact(store, DemoProvider(), settings, "Latest release?", ["demo-team"])
     store.feedback(Feedback(run_id=answer.run_id, outcome="accepted", source="test"))
     report = analyze(store, DemoProvider(), settings)
-    assert len(report.diagnoses) == 1 and report.findings == []
+    assert len(report.diagnoses) == 1 and len(report.findings) == 1
+    assert report.findings[0].purpose == "uncertainty_calibration"
+    assert report.eligible_for_revision
     assert report.calibration_run_ids == [answer.run_id]
     assert report.incomplete == {}
 
@@ -526,7 +525,7 @@ def test_synthesis_repair_stays_within_context_budget(store, settings):
     provider = OversizedDraft()
     report = analyze(store, provider, settings)
     assert report.eligible_for_revision
-    assert len(provider.contexts) == 2
+    assert len(provider.contexts) == 3  # bucket correction, then cross-bucket synthesis
     assert max(provider.contexts) <= settings.synthesis_max_context_chars
 
 
@@ -645,3 +644,389 @@ def test_failed_output_contract_can_be_diagnosed_without_answer_or_confidence(st
     assert report.selected_run_ids == [run_id]
     assert len(report.diagnoses) == 1
     assert not report.incomplete
+
+
+class SynthesisProvider:
+    """Record the real synthesis phases and return evidence-preserving findings."""
+
+    def __init__(self):
+        self.inputs = []
+        self.context_sizes = []
+
+    def complete(self, messages, tools):
+        from evog.io import dumps
+
+        assert not tools
+        supplied = json.loads(messages[1]["content"])
+        self.inputs.append(supplied)
+        self.context_sizes.append(len(dumps(messages)))
+        units = [unit for bucket in supplied["buckets"].values() for unit in bucket]
+        findings = [
+            {
+                "id": f"finding-{index}",
+                "query_types": unit.get("query_types", [unit["query_type"]]),
+                "pattern": unit["condensed_rationale"],
+                "suggested_change": unit["actionable_implication"],
+                "evidence": unit["evidence"],
+                "counterevidence": "Only the included traces were inspected",
+                "uncertainty": unit["uncertainty"],
+                "purpose": unit["signal"],
+                "support_kind": "isolated",
+            }
+            for index, unit in enumerate(units)
+        ]
+        return ModelReply(content=json.dumps({"findings": findings}))
+
+
+def install_diagnoses(monkeypatch, labels=None, large=False):
+    from evog.models import Diagnosis
+
+    def diagnosed(store, provider, settings, run_id, controls, access):
+        ref = access.inspect(InspectArgs(run_id=run_id, event_index=0))["evidence_ref"]
+        data = diagnosis_payload(run_id, ref)
+        data["query_type"] = (labels or {}).get(run_id, "Source attribution")
+        data["query_family"] = "other"
+        if large:
+            data["cause"] = "The attribution bridge was not checked. " * 24
+            data["condensed_rationale"] = "Resolve the attribution bridge. " * 25
+        return Diagnosis.model_validate(data)
+
+    monkeypatch.setattr("evog.analysis.diagnose", diagnosed)
+
+
+@pytest.mark.parametrize("use_all_flag", [False, True])
+def test_all_eligible_analysis_does_not_truncate_question_scopes(store, settings, use_all_flag):
+    ids = [create_run(store, 0.8, "rejected", question=f"Question {index}") for index in range(3)]
+    settings.analysis_max_runs = 1 if use_all_flag else None
+    settings.analysis_all_eligible = use_all_flag
+    selection = select_experience(store, settings, store.harness().id)
+    assert set(selection["selected"]) == set(ids)
+    assert selection["coverage"]["eligible_questions"] == 3
+    assert selection["coverage"]["omitted_questions"] == 0
+
+
+def test_open_query_types_preserve_raw_labels_and_drive_two_real_synthesis_stages(
+    store, settings, monkeypatch
+):
+    ids = [create_run(store, 0.8, "rejected", question=f"Question {index}") for index in range(3)]
+    for run_id in ids:
+        store.event(run_id, "answer", {"text": "answer"})
+    labels = {
+        ids[0]: "  Shared   Responsibility  ",
+        ids[1]: "shared responsibility",
+        ids[2]: "Novel provenance reconciliation",
+    }
+    install_diagnoses(monkeypatch, labels)
+    provider = SynthesisProvider()
+    report = analyze(store, provider, settings)
+    assert [request["phase"] for request in provider.inputs] == ["bucket", "bucket", "cross_bucket"]
+    assert {bucket.normalized_label for bucket in report.query_buckets} == {
+        "shared responsibility",
+        "novel provenance reconciliation",
+    }
+    assert {diagnosis.query_type for diagnosis in report.diagnoses} == set(labels.values())
+    assert all(diagnosis.query_family == "other" for diagnosis in report.diagnoses)
+    shared = next(
+        bucket
+        for bucket in report.query_buckets
+        if bucket.normalized_label == "shared responsibility"
+    )
+    assert set(shared.original_labels) == {labels[ids[0]], labels[ids[1]]}
+    assert set(shared.diagnosis_run_ids) == set(ids[:2])
+    assert len(provider.inputs[-1]["buckets"]) == 2
+    assert all(
+        request["finding_min_support"] == settings.finding_min_support
+        for request in provider.inputs
+    )
+    assert report.coverage["cross_bucket_comparison_batches"] == 1
+    assert report.eligible_for_revision and len(report.findings) == 3
+    assert report.query_type_normalization == "casefold-whitespace.v1"
+
+
+def test_uc_only_experience_produces_findings_without_changing_correctness(
+    store, settings, monkeypatch
+):
+    ids = [create_run(store, 0.5, "accepted", question=f"Question {index}") for index in range(2)]
+    for run_id in ids:
+        store.event(run_id, "answer", {"text": "correct but uncertain"})
+    install_diagnoses(monkeypatch)
+    provider = SynthesisProvider()
+    report = analyze(store, provider, settings)
+    assert report.coverage["UC"] == 2 and report.coverage["UW"] == 0
+    assert report.failure_run_ids == [] and set(report.calibration_run_ids) == set(ids)
+    assert report.eligible_for_revision and len(report.findings) == 2
+    assert all(finding.purpose == "uncertainty_calibration" for finding in report.findings)
+    assert {
+        unit["experience_cell"]
+        for units in provider.inputs[0]["buckets"].values()
+        for unit in units
+    } == {"UC"}
+    assert {row["outcome"] for row in store.runs(store.harness().id)} == {"accepted"}
+
+
+def test_unjudged_uncertainty_keeps_its_label_and_missing_confidence_is_not_low(
+    store, settings, monkeypatch
+):
+    unjudged = create_run(store, 0.1, question="Unjudged")
+    missing = create_run(store, 0.1, "accepted", question="Missing")
+    store.finish_run(missing, None, "completed")
+    store.event(unjudged, "answer", {"text": "uncertain"})
+    install_diagnoses(monkeypatch)
+    provider = SynthesisProvider()
+    report = analyze(store, provider, settings)
+    assert report.coverage["UC"] == 0 and report.coverage["UW"] == 0
+    assert report.coverage["missing_confidence"] == 1
+    assert report.selected_run_ids == [unjudged]
+    unit = next(iter(provider.inputs[0]["buckets"].values()))[0]
+    assert unit["experience_cell"] == "unjudged_low"
+    assert unit["evidence_signals"][unjudged] == "unjudged_low"
+    assert report.findings[0].purpose == "uncertainty_calibration"
+
+
+def test_accepted_sibling_evidence_cannot_supply_error_support_for_a_failed_question(
+    store, settings, monkeypatch
+):
+    from evog.models import Diagnosis
+
+    failed = create_run(store, 0.9, "rejected", question="Same")
+    accepted = create_run(store, 0.2, "accepted", question="Same")
+    for run_id in (failed, accepted):
+        store.event(run_id, "answer", {"text": "answer"})
+
+    def diagnosed(store, provider, settings, run_id, controls, access):
+        own = access.inspect(InspectArgs(run_id=failed, event_index=0))["evidence_ref"]
+        sibling = access.inspect(InspectArgs(run_id=accepted, event_index=0))["evidence_ref"]
+        return Diagnosis.model_validate(
+            {**diagnosis_payload(run_id, own), "evidence": [own, sibling]}
+        )
+
+    monkeypatch.setattr("evog.analysis.diagnose", diagnosed)
+    provider = SynthesisProvider()
+
+    def forged(messages, tools):
+        reply = provider.complete(messages, tools)
+        finding = json.loads(reply.content)["findings"][0]
+        finding["evidence"] = [ref for ref in finding["evidence"] if ref["run_id"] == accepted]
+        assert finding["purpose"] == "error_repair"
+        return ModelReply(content=json.dumps({"findings": [finding]}))
+
+    scripted = ScriptedProvider(forged, forged, forged)
+    report = analyze(store, scripted, settings)
+    assert not report.findings and not report.eligible_for_revision
+    assert "synthesis" in report.incomplete
+
+
+def test_context_bounded_bucket_batches_cover_every_complete_diagnosis(
+    store, settings, monkeypatch
+):
+    ids = [create_run(store, 0.9, "rejected", question=f"Question {index}") for index in range(8)]
+    for run_id in ids:
+        store.event(run_id, "answer", {"text": "answer"})
+    settings.analysis_all_eligible = True
+    settings.synthesis_max_context_chars = 12500
+    install_diagnoses(monkeypatch, large=True)
+    provider = SynthesisProvider()
+    report = analyze(store, provider, settings)
+    bucket_requests = [request for request in provider.inputs if request["phase"] == "bucket"]
+    assert len(bucket_requests) > 1
+    assert {
+        unit["run_id"]
+        for request in bucket_requests
+        for units in request["buckets"].values()
+        for unit in units
+    } == set(ids)
+    assert report.coverage["synthesis_included"] == 8
+    assert report.coverage["synthesis_omitted"] == 0
+    assert report.eligible_for_revision and not report.incomplete
+    assert max(provider.context_sizes) <= settings.synthesis_max_context_chars
+    assert any(request["phase"] == "cross_bucket" for request in provider.inputs)
+    assert len({finding.id for finding in report.findings}) == len(report.findings)
+
+
+def test_cross_bucket_stage_cannot_reintroduce_evidence_not_in_bucket_findings(
+    store, settings, monkeypatch
+):
+    from evog.models import Diagnosis
+
+    run_id = create_run(store, 0.9, "rejected")
+    store.event(run_id, "answer", {"text": "first"})
+    store.event(run_id, "tool", {"name": "read_file", "result": "second"})
+    refs = [
+        TraceAccess(store, [run_id]).inspect(InspectArgs(run_id=run_id, event_index=i))[
+            "evidence_ref"
+        ]
+        for i in range(2)
+    ]
+
+    def diagnosed(store, provider, settings, target, controls, access):
+        return Diagnosis.model_validate({**diagnosis_payload(target, refs[0]), "evidence": refs})
+
+    monkeypatch.setattr("evog.analysis.diagnose", diagnosed)
+    provider = SynthesisProvider()
+
+    def draft(messages, tools):
+        reply = provider.complete(messages, tools)
+        finding = json.loads(reply.content)["findings"][0]
+        phase = json.loads(messages[1]["content"])["phase"]
+        finding["evidence"] = [refs[0] if phase == "bucket" else refs[1]]
+        return ModelReply(content=json.dumps({"findings": [finding]}))
+
+    report = analyze(store, ScriptedProvider(draft, draft, draft, draft), settings)
+    assert report.query_buckets[0].findings
+    assert not report.findings and not report.eligible_for_revision
+    assert "cross_bucket:0" in report.incomplete
+
+
+def test_transport_failure_is_not_retried_by_diagnosis_or_synthesis(store, settings, monkeypatch):
+    from evog.errors import ProviderError
+
+    run_id = create_run(store, 0.9, "rejected")
+    store.event(run_id, "answer", {"text": "answer"})
+    failed_diagnosis = ScriptedProvider(ProviderError("transport exhausted"))
+    with pytest.raises(ProviderError):
+        diagnose(store, failed_diagnosis, settings, run_id, [], TraceAccess(store, [run_id]))
+    assert len(failed_diagnosis.calls) == 1
+    install_diagnoses(monkeypatch)
+    failed_synthesis = ScriptedProvider(ProviderError("transport exhausted"))
+    report = analyze(store, failed_synthesis, settings)
+    assert len(failed_synthesis.calls) == 1
+    assert not report.eligible_for_revision and "synthesis" in report.incomplete
+
+
+def test_legacy_analysis_reports_load_without_claiming_new_bucket_provenance():
+    from evog.models import AnalysisReport
+
+    old = {
+        "id": "old",
+        "revision_id": "revision",
+        "coverage": {},
+        "selected_run_ids": [],
+        "control_run_ids": [],
+        "diagnoses": [],
+        "findings": [],
+        "incomplete": {},
+    }
+    report = AnalysisReport.model_validate(old)
+    assert report.schema_version == "evog.analysis.v1"
+    assert report.query_type_normalization is None and report.query_buckets == []
+
+
+def test_apd_summary_and_search_do_not_deliver_hidden_trace_evidence(store):
+    from evog.analysis import SearchTraceArgs
+
+    run_id = create_run(store, 0.1, "rejected")
+    store.event(
+        run_id, "tool", {"name": "read_file", "result": "trace payload not initially visible"}
+    )
+    access = TraceAccess(store, [run_id])
+    assert "trace payload" not in json.dumps(access.summary(run_id))
+    result = access.search(SearchTraceArgs(run_id=run_id, term="trace payload"))
+    assert result["events"] == [{"index": 0, "kind": "tool"}]
+    assert access.delivered == set()
+    inspected = access.inspect(InspectArgs(run_id=run_id, event_index=0, field_path="/result"))
+    assert inspected["content"] == "trace payload not initially visible"
+    assert len(access.delivered) == 1
+
+
+def test_normalization_does_not_guess_semantic_synonyms():
+    from evog.analysis import normalize_query_type
+
+    assert normalize_query_type("  Temporal   Reasoning ") == "temporal reasoning"
+    assert normalize_query_type("Chronology") != normalize_query_type("Temporal reasoning")
+    with pytest.raises(ContractError):
+        normalize_query_type(" \t\n ")
+
+
+@pytest.mark.parametrize("include_both_types", [False, True])
+def test_cross_bucket_claims_require_evidence_from_each_declared_type(
+    store, settings, monkeypatch, include_both_types
+):
+    ids = [create_run(store, 0.9, "rejected", question=f"Question {index}") for index in range(2)]
+    for run_id in ids:
+        store.event(run_id, "answer", {"text": "answer"})
+    install_diagnoses(monkeypatch, {ids[0]: "Attribution", ids[1]: "Chronology"})
+    provider = SynthesisProvider()
+
+    def draft(messages, tools):
+        reply = provider.complete(messages, tools)
+        supplied = json.loads(messages[1]["content"])
+        if supplied["phase"] == "bucket":
+            return reply
+        findings = json.loads(reply.content)["findings"]
+        joined = findings[0]
+        joined["query_types"] = [label for finding in findings for label in finding["query_types"]]
+        if include_both_types:
+            joined["evidence"] = [ref for finding in findings for ref in finding["evidence"]]
+            joined["support_kind"] = "repeated"
+        return ModelReply(content=json.dumps({"findings": [joined]}))
+
+    report = analyze(store, ScriptedProvider(*([draft] * 8)), settings)
+    assert len(report.query_buckets) == 2
+    if include_both_types:
+        assert report.eligible_for_revision and len(report.findings) == 1
+        assert set(report.findings[0].query_types) == {"Attribution", "Chronology"}
+        assert {ref.run_id for ref in report.findings[0].evidence} == set(ids)
+    else:
+        assert not report.findings and not report.eligible_for_revision
+        assert "cross_bucket:0" in report.incomplete
+
+
+def test_cross_bucket_inputs_preserve_uc_and_unjudged_evidence_status(store, settings, monkeypatch):
+    uc = create_run(store, 0.2, "accepted", question="Successful uncertainty")
+    unjudged = create_run(store, 0.2, question="Unjudged uncertainty")
+    for run_id in (uc, unjudged):
+        store.event(run_id, "answer", {"text": "answer"})
+    install_diagnoses(monkeypatch)
+    provider = SynthesisProvider()
+    report = analyze(store, provider, settings)
+    assert report.eligible_for_revision
+    units = [
+        unit
+        for request in provider.inputs
+        if request["phase"] == "cross_bucket"
+        for bucket in request["buckets"].values()
+        for unit in bucket
+    ]
+    signals = {
+        run_id: label for unit in units for run_id, label in unit["evidence_signals"].items()
+    }
+    assert signals == {uc: "UC", unjudged: "unjudged_low"}
+    assert {unit["experience_cell"] for unit in units} == {"UC", "unjudged_low"}
+    assert all(unit["experience_cells"] == [unit["experience_cell"]] for unit in units)
+
+
+def test_multiple_cross_batches_namespace_every_id_even_prefixed_model_ids(
+    store, settings, monkeypatch
+):
+    from evog import analysis
+
+    ids = [create_run(store, 0.9, "rejected", question=f"Question {index}") for index in range(3)]
+    for run_id in ids:
+        store.event(run_id, "answer", {"text": "answer"})
+    install_diagnoses(monkeypatch)
+    original_batches = analysis._synthesis_batches
+
+    def batches(phase, units, *args):
+        if phase == "cross_bucket":
+            return [units[:2], units[2:]], []
+        return original_batches(phase, units, *args)
+
+    monkeypatch.setattr(analysis, "_synthesis_batches", batches)
+    provider = SynthesisProvider()
+
+    def draft(messages, tools):
+        reply = provider.complete(messages, tools)
+        if json.loads(messages[1]["content"])["phase"] == "bucket":
+            return reply
+        findings = json.loads(reply.content)["findings"]
+        for finding, label in zip(findings, ["foo", "cross:1:foo"], strict=False):
+            finding["id"] = label
+        return ModelReply(content=json.dumps({"findings": findings}))
+
+    report = analyze(store, ScriptedProvider(draft, draft, draft), settings)
+    assert report.eligible_for_revision
+    assert {finding.id for finding in report.findings} == {
+        "cross:0:foo",
+        "cross:0:cross:1:foo",
+        "cross:1:foo",
+    }

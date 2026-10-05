@@ -4,107 +4,49 @@
 
 ### Self-Evolving Memory Harness for Shared-Context Group Agents
 
-**Interact. Analyze. Evolve.**
+**Interact · Analyze · Evolve**
 
-<a href="#results"><img alt="Paper" src="https://img.shields.io/badge/Paper-EvoGroup-b31b1b?style=flat"></a>
-<img alt="Python" src="https://img.shields.io/badge/Python-3.11%2B-3b82f6?style=flat&logo=python&logoColor=white">
-<img alt="Version" src="https://img.shields.io/badge/Version-0.1.0-a855f7?style=flat">
-<img alt="Interface" src="https://img.shields.io/badge/Interface-CLI-0891b2?style=flat">
+<img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat&logo=python&logoColor=white">
+<img alt="Interface: CLI" src="https://img.shields.io/badge/Interface-CLI-0891B2?style=flat">
+<img alt="Version 0.1.0" src="https://img.shields.io/badge/Version-0.1.0-7C3AED?style=flat">
 
-[Paper Results](#results) · [Overview](#overview) · [Method](#method) · [Results](#results) · [Quick Start](#quick-start) · [简体中文](README_zh.md)
+[Paper results](#paper-results) · [Method](#method) · [Quick start](#quick-start) · [中文](README_zh.md)
 
 </div>
 
 ---
 
-## Overview
+EvoGroup is a memory harness for agents that answer questions over shared, multi-user context. It keeps source messages as evidence, scopes learned memory to authorized groups, and improves the surrounding harness from interaction feedback while the base model remains fixed.
 
-**EvoGroup (EvoG)** is a self-evolving memory harness for group agents operating over shared
-contexts. It helps an agent preserve who said what, how a discussion developed, and which
-information remains current across long multi-user conversations.
+The release provides:
 
-Instead of fixing memory organization and retrieval strategies by hand, EvoG improves the
-harness surrounding a fixed base model through interaction experience. Starting with **five
-basic tools and empty learned memory and skills**, it selects informative trajectories,
-inspects evidence on demand, discovers recurring patterns, and revises the harness for the
-next round of interactions.
-
-**Highlight:** in the paper's DeepSeek-V4-Flash setting, five harness updates raise
-EverMemBench pass@1 from **71.07% to 89.58% (+18.51 percentage points)**. The same study reports
-lower analysis cost with Adaptive Progressive Disclosure and evaluates frozen transfer to
-GroupMemBench. Full results and their scope appear [below](#results).
+- group-scoped memory with traceable citations;
+- five bounded evidence and navigation tools;
+- confidence-guided trajectory analysis with Adaptive Progressive Disclosure (APD);
+- bucketed diagnosis and four declarative revision interfaces;
+- a CLI for local runs and adapters for EverMemBench and GroupMemBench.
 
 ## Method
 
 <p align="center">
-  <img src="assets/evog-framework.png" alt="EvoGroup's four-stage self-evolution loop" width="1100">
+  <img src="assets/evog-framework.png" alt="EvoGroup self-evolution loop" width="1000">
 </p>
 
-### 1. Interaction
+1. **Interact.** The current harness $H_t$ answers a question over explicitly selected groups. Original conversation records remain the evidence source; long-term notes are scoped to the exact authorized group set and working memory is isolated per question. The initial harness exposes <code>list_files</code>, <code>read_file</code>, <code>grep_search</code>, <code>write_file</code>, and <code>create_file</code>.
 
-The Group Agent uses the current harness $H_t$ to answer a query over shared group context,
-producing an answer, a tool-use trajectory, and subjective confidence. The model-facing answer
-uses a stable plain-text protocol (`FINAL ANSWER`, `CONFIDENCE`, and conditional `ANSWER BIAS`);
-the runtime stores typed fields and the raw response. For low-confidence answers, it reflects on
-uncertainty **before external feedback is revealed**.
+2. **Select experience.** External correctness and model confidence are combined at a 0.5 threshold. The resulting CC, CW, UC, and UW cases distinguish routine success, unrecognized failure, fragile success, and recognized failure for analysis.
 
-The cold-start tools are `list_files`, `read_file`, `grep_search`, `write_file`, and `create_file`.
-Original conversation records remain the evidence source; learned notes are navigation aids.
-Long-term notes belong to the exact authorized group set; working memory starts fresh per query.
+3. **Analyze evidence.** APD presents a compact trace structure before detailed events. The analysis agent opens only the relevant observations and records evidence ranges for each diagnosis. Bucketed analysis groups diagnoses by question semantics and retains coverage, counterevidence, and uncertainty.
 
-### 2. Confidence-Guided Trajectory Selection
+4. **Evolve the harness.** The evolution agent emits bounded, evidence-linked revisions across Representation, Operation, Policy, and Intervention. Revisions are declarative, versioned, atomically activated, and reversible. The selected evolved checkpoint is denoted $H_{*}$.
 
-The paper combines confidence with external correctness, using a confidence threshold of 0.5:
+## Paper results
 
-| Experience | Signal | Role in analysis |
-| --- | --- | --- |
-| **CC** — confident and correct | Routine success | Successful context/control |
-| **CW** — confident and wrong | An unrecognized failure | Prioritized diagnosis |
-| **UC** — unconfident and correct | A fragile success | Prioritized diagnosis + reflection |
-| **UW** — unconfident and wrong | A recognized uncertainty or failure | Prioritized diagnosis + reflection |
-
-### 3. From Trace Details to Recurring Patterns
-
-**Adaptive Progressive Disclosure (APD)** exposes a compact structural trace view first.
-The Analysis Agent locates relevant stages and requests observations, tool results, or event
-fields only when needed. Diagnoses must cite the exact evidence ranges actually inspected.
-
-**Bucketed Analysis** condenses detailed diagnoses, groups them by inferred query semantics,
-and compares patterns within and across buckets. The output is a set of high-level findings
-with evidence, coverage, counterevidence, and uncertainty.
-
-The CLI groups repeated trials by question and authorized groups, with one diagnosis job per
-question. Default synthesis uses failures; uncertain accepted or unjudged answers remain
-calibration diagnoses. If diagnosis or synthesis fails, revision can independently inspect
-selected traces and register an evidence-backed finding. A repeated pattern needs different
-questions, while evidence from one question is explicitly isolated.
-
-### 4. Multi-Interface Harness Revision
-
-The Evolve Agent converts findings into bounded revisions. Each change declares its interface,
-evidence, expected behavior, regression risk, and validation check.
-
-| Interface | What changes | Current implementation |
-| --- | --- | --- |
-| **Representation** | How information is stored, linked, or presented | Metadata, timestamp views and reply references |
-| **Operation** | Executable retrieval and evidence operations | Search fields, literal/word matches, conjunction, read/search limits and neighboring records |
-| **Policy** | What to select, when, and in which order | Group-agent prompt and reusable Markdown skills |
-| **Intervention** | Checks or transformations at execution boundaries | Citation requirements, partial-answer confidence and answer-size limits |
-
-A revised $H_{t+1}$ is versioned and used in subsequent interactions. Source records, model
-settings, runtime budgets, and core grounding checks remain fixed. The current release uses
-declarative revisions with atomic activation, stale-plan checks, and rollback. Per-change manifests
-retain expected fixes, risks and observed results. Benchmark cycles validate paired trials before
-activation and can recover a previously active, comparable best version after a rejected regression.
-
-## Results
-
-The tables and figures report results from the **EvoGroup paper**. 
+The following values are reported in the EvoGroup paper. They are the paper's aggregate results, not a rerun performed by this repository snapshot.
 
 ### EverMemBench
 
-Reported pass@1 (%) from the main-results table. $H_0$ is the initial harness; $H_{*}$ is the
-selected evaluated harness. Bold marks the highest reported aggregate in each backbone column.
+Pass@1 (%); $H_0$ is the initial harness and $H_{*}$ is the selected evolved checkpoint.
 
 | Method | GPT-5.5 | DeepSeek-V4-Flash | GLM-5.1 |
 | --- | ---: | ---: | ---: |
@@ -116,90 +58,51 @@ selected evaluated harness. Bold marks the highest reported aggregate in each ba
 | Claude Code | 84.58 | 85.75 | 76.46 |
 | EvoGroup $H_0$ | 68.33 | 71.07 | 68.27 |
 | EvoGroup $H_{*}$ | 84.52 | **89.58** | **83.63** |
-| **$H_0$ → $H_{*}$ change** | **+16.19 pp** | **+18.51 pp** | **+15.36 pp** |
+| **$H_0 \rightarrow H_{*}$** | **+16.19 pp** | **+18.51 pp** | **+15.36 pp** |
 
-The paper uses 720 fixed evolution questions drawn from 2,400 EverMemBench questions,
-plus 1,680 separate held-out questions.
+The paper uses 2,400 questions, with 720 questions for evolution and 1,680 held out for evaluation.
 
-### Frozen Transfer to GroupMemBench
+### Frozen transfer to GroupMemBench
 
-The evolved harness is applied without further evolution or tuning. The paper reports 745 questions
-and the following aggregates:
+The evolved checkpoint is evaluated without further evolution or tuning.
 
 | Backbone | $H_0$ | Frozen $H_{*}$ | Change |
 | --- | ---: | ---: | ---: |
 | GPT-5.5 | 61.88% | 63.89% | +2.01 pp |
 | DeepSeek-V4-Flash | 74.09% | 71.14% | −2.95 pp |
 
-### Analysis Efficiency and Component Ablation
+### Analysis efficiency and ablation
 
-Across five matched analysis iterations, APD reports **42.5% less analysis time** and
-**41.5% fewer tokens** on average than full-trace analysis.
+Across five matched analysis iterations, APD reduces analysis time by 42.5% and token use by 41.5% relative to full-trace analysis.
 
 <p align="center">
-  <img src="assets/harness-ablation.png" alt="Component-level harness ablation" width="900">
+  <img src="assets/harness-ablation.png" alt="EvoGroup harness component ablation" width="850">
 </p>
 
-The original component-ablation graphic compares individual evolved components with the
-initial harness. Tools and prompts show the largest individual gains in this setting. The paper
-also reports reduced performance when APD or bucketed analysis is removed, while trajectory
-selection has limited benefit in the tested process ablation.
+## Quick start
 
-## Quick Start
+### Installation
 
-### Install
+Python 3.11+ and [uv](https://docs.astral.sh/uv/) are required.
 
-Use **Python 3.11+** and [uv](https://docs.astral.sh/uv/). From the repository root:
-
-```bash
+~~~
 uv sync --locked --extra dev
 uv run evog --help
-```
+~~~
 
-<details>
-<summary>Install with a regular Python virtual environment</summary>
+### Offline demo
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -e '.[dev]'
-evog --help
-```
+The demo uses a deterministic fixture provider and makes no network requests. It runs the complete local flow: ingest, answer, feedback, analysis, revision proposal, and activation.
 
-On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1`.
-Use `evog` in place of `uv run evog` after activating this environment.
-
-</details>
-
-### Configuration
-
-Copy [.env.example](.env.example), replace the placeholder endpoint, model, and API key, and
-export the variables in your shell. EvoG does not load `.env` files automatically. Use
-[examples/benchmark.toml](examples/benchmark.toml) as a starting point for deployment and
-benchmark settings, then pass it with `--config`:
-
-```bash
-set -a
-source .env.example
-set +a
-uv run evog --config examples/benchmark.toml --workspace /tmp/evog-demo demo
-```
-
-### Run the Offline Demo
-
-```bash
+~~~
 uv run evog --workspace /tmp/evog-demo demo
-# or use the checked-in wrapper
-./examples/run_demo.sh
-```
+~~~
 
-The demo uses synthetic conversations and a deterministic fixture provider. It runs import,
-cited answering, feedback, trace analysis, revision planning, and activation without network
-requests. It verifies the command flow; it is not a model-quality experiment.
+### Run on group messages
 
-### Query Your Own Group Context
+Set an OpenAI-compatible endpoint and model in the shell. The API key is read from <code>EVOG_API_KEY</code> and is not written to the repository.
 
-```bash
+~~~
 export EVOG_BASE_URL=https://your-provider.example/v1
 export EVOG_MODEL=your-model
 export EVOG_API_KEY=your-key
@@ -207,73 +110,75 @@ export EVOG_API_KEY=your-key
 uv run evog init
 uv run evog ingest examples/messages.jsonl
 uv run evog groups
-uv run evog ask 'What is the latest release schedule?' --group product
-```
+uv run evog ask "What is the latest release schedule?" --group product
+~~~
 
-The import format requires `group_id`, `message_id`, `sender`, timezone-aware `timestamp`, and
-`text`. `reply_to` and string-valued `metadata` are optional. See [example messages](examples/messages.jsonl).
-Duplicate imports are idempotent; conflicting content under the same source ID rejects the import.
-Repeat `--group` for a query over multiple authorized groups.
+Each input record contains <code>group_id</code>, <code>message_id</code>, <code>sender</code>, a timezone-aware <code>timestamp</code>, and <code>text</code>. <code>reply_to</code> and string metadata are optional. <code>examples/messages.jsonl</code> is a complete minimal input.
 
-### Analyze and Revise
+### Analyze and evolve
 
-```bash
+~~~
 uv run evog feedback RUN_ID rejected --source user
 uv run evog select
 uv run evog analyze
 uv run evog propose ANALYSIS_ID
 uv run evog apply PLAN_ID
-uv run evog revisions
-uv run evog rollback REVISION_ID
-```
+~~~
 
-Record `accepted` or `rejected` according to the actual outcome; the example selects a failure
-for diagnosis. Use the IDs printed by the preceding commands. Apply only a plan with changes.
-`apply` activates a structurally validated candidate; its business effect must be checked in
-subsequent use. An empty plan is valid when no finding supports a change. Use `trace RUN_ID` to
-inspect a run and `ask --json` for structured output.
+The identifiers are emitted by the preceding commands. <code>revisions</code> lists checkpoints and <code>rollback REVISION_ID</code> restores a previous checkpoint.
 
-## Project Structure
+## Paper benchmark adapters
 
-```text
-EvoG/
-├── src/evog/
-│   ├── cli.py                # evog command entry point
-│   ├── app.py                # internal command orchestration
-│   ├── runtime.py            # group interaction and pre-feedback reflection
-│   ├── tools.py              # five scoped evidence/navigation tools
-│   ├── analysis.py           # selection, APD, diagnoses and bucketed findings
-│   ├── evolution.py          # plans, candidate validation and activation
-│   ├── harness.py            # four bounded revision interfaces
-│   ├── store.py              # messages, traces, feedback and versioned harnesses
-│   ├── providers.py          # model transport
-│   └── prompts/              # group, reflection, analysis, synthesis and revision
-├── assets/                   # paper framework and ablation figures
-├── examples/                 # synthetic messages and command-line demo
-├── tests/                    # regression checks without paid API calls
-└── .github/workflows/ci.yml   # lint, tests, packaging and offline demo
-```
+Benchmark data is not included in this repository. The EverMemBench checkout must contain <code>dataset/</code>; the GroupMemBench checkout must contain <code>data/final/</code> and <code>questions/</code>.
 
-## Benchmarks
+List a deterministic EverMemBench sample:
 
-EvoG supports **EverMemBench** and **GroupMemBench** with official scoring protocols,
-episode-ID selection, per-question memory isolation and paired candidate validation.
-`--trials N` repeats each question independently; `--resume` continues an interrupted checkpoint
-with matching inputs and runtime. Both note layers are isolated for every benchmark trial.
-Provide a local EverMemBench root containing `dataset/`, or a GroupMemBench root containing
-`data/final/` and `questions/`. Use `uv run evog benchmark --help` for run and cycle options.
+~~~
+uv run evog benchmark list evermembench \
+  --data-root /path/to/EverMemBench --topic 01 --limit 2
+~~~
 
-```bash
-uv run evog benchmark list evermembench --data-root /path/to/EverMemBench --topic 01 --limit 2
-uv run evog benchmark cycle groupmembench --data-root /path/to/GroupMemBench-main \
-  --domain Finance --question-type multi_hop --limit 2 --output results.json
-```
+Run the product cycle on a GroupMemBench slice:
 
-## Development
+~~~
+uv run evog benchmark cycle groupmembench \
+  --data-root /path/to/GroupMemBench \
+  --domain Finance --question-type multi_hop --limit 2 \
+  --output results.json
+~~~
 
-```bash
-uv run pytest
-uv run ruff check .
-uv run ruff format --check .
+For the paper cohort, create the fixed 720/1,680 split and run the six-round evolution campaign:
+
+~~~
+uv run evog benchmark split evermembench \
+  --data-root /path/to/EverMemBench --split-seed 0 \
+  --output splits/evermem
+
+uv run evog --config examples/paper.toml \
+  --workspace .evog-campaign-0 benchmark campaign evermembench \
+  --data-root /path/to/EverMemBench \
+  --manifest splits/evermem/manifest.json \
+  --evaluation-rounds 6 --seed 0 \
+  --output results/campaign-0.json
+~~~
+
+<code>examples/benchmark.toml</code> contains the product profile. <code>examples/paper.toml</code> contains the research profile; provider endpoints and keys are supplied through environment variables.
+
+## Repository layout
+
+~~~
+src/evog/     CLI, runtime, memory, analysis, evolution, and model transport
+src/evog/prompts/  model-facing prompt templates
+examples/     demo input and product/research configuration templates
+assets/       paper figures
+tests/        offline regression tests
+~~~
+
+## Verification
+
+~~~
+uv run pytest -q
+uv run ruff check src tests
+uv run ruff format --check src tests
 uv build
-```
+~~~

@@ -20,7 +20,7 @@ evog = "evog.cli:main"
 packages = ["src/evog"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src", "tests", "examples", "assets", "README*", "pyproject.toml", "uv.lock", ".env.example", ".gitignore", ".github"]
+include = ["src", "tests", "examples", "assets", "README*", "pyproject.toml", "uv.lock"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

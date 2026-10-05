@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import UTC
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 from pydantic import Field
@@ -13,6 +13,7 @@ from pydantic import Field
 from evog.errors import ContractError
 from evog.harness import Harness
 from evog.io import atomic_write, dumps, fingerprint, safe_path
+from evog.memory import QuestionMemory
 from evog.models import Message, Record
 from evog.store import Store
 from evog.tool_results import ToolResults
@@ -42,7 +43,9 @@ class SearchArgs(Record):
     query: str = ""
     patterns: list[str] = Field(default_factory=list, max_length=8)
     selected_patterns: list[str] = Field(default_factory=list, max_length=2)
-    required_pattern_groups: list[list[str]] = Field(default_factory=list, max_length=8)
+    required_pattern_groups: list[Annotated[list[str], Field(min_length=1, max_length=8)]] = Field(
+        default_factory=list, max_length=8
+    )
     optional_patterns: list[str] = Field(default_factory=list, max_length=8)
     terms: list[str] = Field(default_factory=list, max_length=8, exclude=True)
     path: str | None = Field(default=None, exclude=True)
@@ -77,7 +80,7 @@ ARGUMENTS = {
     ),
     "grep_search": (
         SearchArgs,
-        "Search memory_units for evidence using query and bounded patterns. Use required pattern groups for aliases of one fact and optional patterns only for ranking context.",
+        "Search using literal strings. Each required_pattern_groups group matches any alias; all groups must match. Selected patterns follow the harness any/all rule. Optional patterns only rank already matching records.",
     ),
     "write_file": (
         WriteArgs,
@@ -130,6 +133,7 @@ class Tools:
         isolated_long_term: bool = False,
         result_session: str | None = None,
         max_output_chars: int = 12000,
+        frozen_memory: QuestionMemory | None = None,
     ):
         if not group_ids:
             raise ContractError("Explicit group scope is required")
@@ -137,6 +141,7 @@ class Tools:
         if not set(group_ids).issubset(known):
             raise ContractError("One or more requested groups have no imported messages")
         self.harness = harness
+        self.frozen_memory = frozen_memory
         # Each source view is frozen at interaction start, even if a later import occurs.
         self.context: dict[str, list[dict[str, Any]]] = {}
         self.group_paths = {}
@@ -169,6 +174,10 @@ class Tools:
         for root in (self.memory_scope_root, self.long_term_root, self.working_root):
             safe_path(store.workspace, root.relative_to(store.workspace).as_posix())
             root.mkdir(parents=True, exist_ok=True)
+        if frozen_memory is not None:
+            if frozen_memory.groups != sorted(set(group_ids)) or not isolated_long_term:
+                raise ContractError("Frozen memory requires matching groups and private staging")
+            frozen_memory.seed(self.long_term_root)
         self.search_ledger_path = self.working_root / "search_ledger.jsonl"
         self.delivered_refs: set[str] = set()
         result_root = safe_path(store.workspace, "tool_results/" + (result_session or uuid4().hex))
@@ -282,6 +291,11 @@ class Tools:
             )
         if args.target == "memory_units":
             names = [name for name in names if name.startswith("memory_units/")]
+        names = [
+            name
+            for name in names
+            if len(name.removeprefix(prefix).strip("/").split("/")) <= args.max_depth
+        ]
         start = args.offset
         rows = [
             {
@@ -389,11 +403,20 @@ class Tools:
 
     def grep_search(self, args: SearchArgs) -> dict[str, Any]:
         selected = args.selected_patterns or args.patterns
-        if not selected and args.query:
+        if not selected and not args.required_pattern_groups and args.query:
             selected = [args.query]
         terms = [term.casefold().strip() for term in selected]
-        if any(not term or len(term) > 256 for term in terms):
+        groups = [
+            [term.casefold().strip() for term in group] for group in args.required_pattern_groups
+        ]
+        optional = [term.casefold().strip() for term in args.optional_patterns]
+        if any(
+            not term or len(term) > 256
+            for term in [*terms, *optional, *(t for g in groups for t in g)]
+        ):
             raise ContractError("Search terms must contain 1–256 characters")
+        if not terms and not groups:
+            raise ContractError("Search needs a query, selected pattern or required group")
         matches = []
         operations = self.harness.operations
 
@@ -441,13 +464,22 @@ class Tools:
                 else:
                     fields = [line.casefold()]
                 hits = [any(contains(term, field) for field in fields) for term in terms]
-                if all(hits) if self.harness.operations.search_mode == "all" else any(hits):
-                    matches.append((path, index, line))
+                base_match = not terms or (
+                    all(hits) if operations.search_mode == "all" else any(hits)
+                )
+                required_match = all(
+                    any(contains(term, field) for term in group for field in fields)
+                    for group in groups
+                )
+                if base_match and required_match:
+                    rank = sum(any(contains(term, field) for field in fields) for term in optional)
+                    matches.append((path, index, line, rank))
+        matches.sort(key=lambda match: (-match[3], match[0], match[1]))
         selected = matches[args.offset : args.offset + self.harness.operations.search_limit]
         rows = []
         returned_refs = set()
         response_chars = 0
-        for path, index, line in selected:
+        for path, index, line, rank in selected:
             row_refs = set()
             row: dict[str, Any] = {
                 "path": path,
@@ -456,6 +488,7 @@ class Tools:
                 "line": index + 1,
                 "excerpt": line[: operations.excerpt_chars],
                 "excerpt_truncated": len(line) > operations.excerpt_chars,
+                "optional_match_count": rank,
             }
             source_path = path
             if path.startswith("memory_units/"):
@@ -500,6 +533,8 @@ class Tools:
                 "target": args.target,
                 "resource_path": args.resource_path,
                 "terms": terms,
+                "required_pattern_groups": groups,
+                "optional_patterns": optional,
                 "offset": args.offset,
                 "total_matches": len(matches),
                 "returned": len(rows),
@@ -556,6 +591,30 @@ class Tools:
         path = safe_path(root, relative)
         if path.suffix not in (".md", ".txt", ".json", ".jsonl"):
             raise ContractError("Navigation notes must be text files")
+        if self.frozen_memory is not None and root == self.long_term_root:
+            if create and path.exists() and not getattr(args, "overwrite", False):
+                raise FileExistsError("Note already exists")
+            append = not create and getattr(args, "mode", "replace") == "append"
+            sources = {row["ref"]: row["text"] for rows in self.context.values() for row in rows}
+            content = self.frozen_memory.validate_and_stage(
+                relative,
+                args.content,
+                self.delivered_refs,
+                sources,
+                append=append,
+            )
+            entries = json.loads(content)["entries"]
+            if append and path.exists():
+                entries = [*json.loads(path.read_text())["entries"], *entries]
+            unique = {dumps(entry): entry for entry in entries}
+            atomic_write(path, dumps({"entries": [unique[key] for key in sorted(unique)]}))
+            return {
+                "target": args.target,
+                "resource_path": args.resource_path,
+                "written_chars": len(args.content),
+                "staged_for_next_round": True,
+                "input_snapshot_id": self.frozen_memory.parent.snapshot_id,
+            }
         if create and not getattr(args, "overwrite", False):
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("x", encoding="utf-8") as stream:

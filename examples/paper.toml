@@ -1,0 +1,32 @@
+# Research profile. Supply endpoints and keys through EVOG_* environment variables.
+# This describes a new run, not a recovered historical experiment.
+model = ""
+base_url = ""
+judge_model = "gpt-5.6-luna"
+judge_base_url = ""
+reasoning_effort = "none"
+judge_reasoning_effort = "none"
+
+max_turns = 60
+final_answer_within_turn_budget = true
+max_tool_calls = 20
+max_output_tokens = 8192
+question_timeout_seconds = 500
+analysis_all_eligible = true
+analysis_concurrency = 8
+analysis_timeout_seconds = 900
+call_attempts = 3
+analysis_retry_backoff_seconds = 10
+evolution_turns = 500
+evolution_max_output_tokens = 32000
+evolution_temperature = 0.7
+judge_concurrency = 4
+judge_call_attempts = 3
+benchmark_concurrency = 6
+context_trim_ratio = 0.75
+
+# Character caps are estimates and do not certify a 200000-token model window.
+max_context_chars = 800000
+analysis_max_context_chars = 800000
+synthesis_max_context_chars = 800000
+evolution_max_context_chars = 800000
