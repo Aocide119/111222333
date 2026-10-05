@@ -190,6 +190,7 @@ def propose(
             "diagnoses": [diagnosis.model_dump() for diagnosis in report.diagnoses],
             "eligible_for_revision": report.eligible_for_revision,
             "coverage": report.coverage,
+            "finding_min_support": settings.finding_min_support,
             "incomplete": report.incomplete,
             "history": store.revisions(),
             "evaluations": store.artifacts("evaluation", limit=10),
@@ -376,7 +377,7 @@ def propose(
                                 },
                             )
                             result = {"registered": True, "finding_id": finding.id}
-                        elif call.name in {"inspect_trace", "search_trace"}:
+                        elif call.name in {"inspect_trace", "search_trace", "read_tool_result"}:
                             if trace_access is None:
                                 trace_access = TraceAccess(
                                     store, [*report.selected_run_ids, *report.control_run_ids]

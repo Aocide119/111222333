@@ -28,7 +28,7 @@ missing evidence. Insufficient answers cannot have confidence above 0.5.
 Return only this plain-text protocol, with no markdown fences or extra commentary:
 FINAL ANSWER: <natural-language answer>
 CONFIDENCE: <number from 0 to 1>
-If confidence is at or below 0.5, append ANSWER BIAS: and explain what was searched, what was
+If confidence is at or below 0.5, append ANSWER BIAS: with at least 80 characters explaining what was searched, what was
 found, what is missing, and whether the limitation was retrieval, reasoning, tools, or budget.
 """
 
@@ -320,7 +320,8 @@ def interact(
                 messages.append(
                     {
                         "role": "user",
-                        "content": f"Output validation failed: {reason}. Return only corrected FINAL ANSWER and CONFIDENCE text.",
+                        "content": f"Output validation failed: {reason}. Return corrected FINAL ANSWER and CONFIDENCE text; "
+                        "include ANSWER BIAS with at least 80 characters when confidence is at or below 0.5.",
                     }
                 )
                 continue

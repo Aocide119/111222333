@@ -335,7 +335,8 @@ def test_synthesis_rejects_evidence_from_context_omitted_diagnosis(store, settin
     monkeypatch.setattr("evog.analysis.diagnose", diagnosed)
     settings.analysis_min_valid = 1
     settings.analysis_min_coverage = 0.5
-    settings.synthesis_max_context_chars = 8000
+    # Allow one complete diagnosis plus the system/schema anchors, but not both.
+    settings.synthesis_max_context_chars = 9000
     ordered = select_experience(store, settings, store.harness().id)["selected"]
     omitted_ref = {
         "run_id": ordered[-1],
@@ -354,11 +355,17 @@ def test_synthesis_rejects_evidence_from_context_omitted_diagnosis(store, settin
         "uncertainty": "unknown",
         "support_kind": "isolated",
     }
+
+    def return_omitted_finding(messages, tools):
+        supplied = json.loads(messages[1]["content"])
+        included = [unit for bucket in supplied["buckets"].values() for unit in bucket]
+        assert len(included) == 1
+        assert included[0]["run_id"] != omitted_ref["run_id"]
+        return ModelReply(content=json.dumps({"findings": [finding]}))
+
     report = analyze(
         store,
-        ScriptedProvider(
-            *(ModelReply(content=json.dumps({"findings": [finding]})) for _ in range(3))
-        ),
+        ScriptedProvider(*(return_omitted_finding for _ in range(3))),
         settings,
     )
     assert not report.findings

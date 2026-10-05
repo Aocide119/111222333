@@ -6,13 +6,12 @@
 
 **Interact. Analyze. Evolve.**
 
-<a href="docs/paper.md"><img alt="Paper" src="https://img.shields.io/badge/Paper-EvoGroup-b31b1b?style=flat"></a>
-<a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-MIT-22c55e?style=flat"></a>
+<a href="#results"><img alt="Paper" src="https://img.shields.io/badge/Paper-EvoGroup-b31b1b?style=flat"></a>
 <img alt="Python" src="https://img.shields.io/badge/Python-3.11%2B-3b82f6?style=flat&logo=python&logoColor=white">
 <img alt="Version" src="https://img.shields.io/badge/Version-0.1.0-a855f7?style=flat">
 <img alt="Interface" src="https://img.shields.io/badge/Interface-CLI-0891b2?style=flat">
 
-[Paper](docs/paper.md) · [Overview](#overview) · [Method](#method) · [Results](#results) · [Quick Start](#quick-start) · [简体中文](README_zh.md)
+[Paper Results](#results) · [Overview](#overview) · [Method](#method) · [Results](#results) · [Quick Start](#quick-start) · [简体中文](README_zh.md)
 
 </div>
 
@@ -38,12 +37,12 @@ GroupMemBench. Full results and their scope appear [below](#results).
 ## Method
 
 <p align="center">
-  <img src="docs/assets/evog-framework.png" alt="EvoGroup's four-stage self-evolution loop" width="1100">
+  <img src="assets/evog-framework.png" alt="EvoGroup's four-stage self-evolution loop" width="1100">
 </p>
 
 ### 1. Interaction
 
-The Group Agent uses the current harness **Hₜ** to answer a query over shared group context,
+The Group Agent uses the current harness $H_t$ to answer a query over shared group context,
 producing an answer, a tool-use trajectory, and subjective confidence. The model-facing answer
 uses a stable plain-text protocol (`FINAL ANSWER`, `CONFIDENCE`, and conditional `ANSWER BIAS`);
 the runtime stores typed fields and the raw response. For low-confidence answers, it reflects on
@@ -97,7 +96,7 @@ evidence, expected behavior, regression risk, and validation check.
 | **Policy** | What to select, when, and in which order | Group-agent prompt and reusable Markdown skills |
 | **Intervention** | Checks or transformations at execution boundaries | Citation requirements, partial-answer confidence and answer-size limits |
 
-A revised **Hₜ₊₁** is versioned and used in subsequent interactions. Source records, model
+A revised $H_{t+1}$ is versioned and used in subsequent interactions. Source records, model
 settings, runtime budgets, and core grounding checks remain fixed. The current release uses
 declarative revisions with atomic activation, stale-plan checks, and rollback.
 Per-change manifests retain expected fixes, risks and observed results. Benchmark cycles validate
@@ -107,11 +106,11 @@ after a rejected regression.
 ## Results
 
 The tables and figures report results from the **EvoGroup paper**. Evaluation settings and
-result sources are documented in [the paper guide](docs/paper.md).
+result sources are documented in [figure and table sources](assets/README.md).
 
 ### EverMemBench
 
-Reported pass@1 (%) from the main-results table. **H₀** is the initial harness; **H*** is the
+Reported pass@1 (%) from the main-results table. $H_0$ is the initial harness; $H_{*}$ is the
 selected evaluated harness. Bold marks the highest reported aggregate in each backbone column.
 
 | Method | GPT-5.5 | DeepSeek-V4-Flash | GLM-5.1 |
@@ -122,13 +121,13 @@ selected evaluated harness. Bold marks the highest reported aggregate in each ba
 | MemRL | 61.54 | 55.92 | 57.33 |
 | Codex | **85.67** | 82.63 | 77.88 |
 | Claude Code | 84.58 | 85.75 | 76.46 |
-| EvoGroup H₀ | 68.33 | 71.07 | 68.27 |
-| EvoGroup H* | 84.52 | **89.58** | **83.63** |
-| **H₀ → H* change** | **+16.19 pp** | **+18.51 pp** | **+15.36 pp** |
+| EvoGroup $H_0$ | 68.33 | 71.07 | 68.27 |
+| EvoGroup $H_{*}$ | 84.52 | **89.58** | **83.63** |
+| **$H_0$ → $H_{*}$ change** | **+16.19 pp** | **+18.51 pp** | **+15.36 pp** |
 
 The paper uses 720 fixed evolution questions drawn from 2,400 EverMemBench questions,
 plus 1,680 separate held-out questions. The values above retain the main table's reported
-aggregate convention; they have not been recomputed here. GPT-5.5 H* remains below Codex and
+aggregate convention; they have not been recomputed here. GPT-5.5 $H_{*}$ remains below Codex and
 Claude Code in that table.
 
 ### Frozen Transfer to GroupMemBench
@@ -136,7 +135,7 @@ Claude Code in that table.
 The evolved harness is applied without further evolution or tuning. The paper reports
 745 questions and the following aggregates:
 
-| Backbone | H₀ | Frozen H* | Change |
+| Backbone | $H_0$ | Frozen $H_{*}$ | Change |
 | --- | ---: | ---: | ---: |
 | GPT-5.5 | 61.88% | 63.89% | +2.01 pp |
 | DeepSeek-V4-Flash | 74.09% | 71.14% | −2.95 pp |
@@ -150,24 +149,23 @@ Across five matched analysis iterations, APD reports **42.5% less analysis time*
 **41.5% fewer tokens** on average than full-trace analysis.
 
 <p align="center">
-  <img src="docs/assets/harness-ablation.png" alt="Component-level harness ablation" width="900">
+  <img src="assets/harness-ablation.png" alt="Component-level harness ablation" width="900">
 </p>
 
 The original component-ablation graphic compares individual evolved components with the
 initial harness. Tools and prompts show the largest individual gains in this setting.
 The paper also reports reduced performance when APD or bucketed analysis is removed, while
 trajectory selection has limited benefit in the tested process ablation.
-See [result sources](docs/paper.md#source-notes) for figure and table details.
+See [result sources](assets/README.md) for figure and table details.
 
 ## Quick Start
 
 ### Install
 
-Python **3.11+** and [uv](https://docs.astral.sh/uv/) are required for the commands below.
-From the repository root:
+Use **Python 3.11+** and [uv](https://docs.astral.sh/uv/). From the repository root:
 
 ```bash
-uv sync --extra dev
+uv sync --locked --extra dev
 uv run evog --help
 ```
 
@@ -180,6 +178,9 @@ source .venv/bin/activate
 python -m pip install -e '.[dev]'
 evog --help
 ```
+
+On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1`.
+Use `evog` in place of `uv run evog` after activating this environment.
 
 </details>
 
@@ -245,11 +246,10 @@ EvoG/
 │   ├── store.py              # messages, traces, feedback and versioned harnesses
 │   ├── providers.py          # model transport
 │   └── prompts/              # group, reflection, analysis, synthesis and revision
-├── docs/                     # paper notes, architecture and configuration
-│   └── assets/               # framework and ablation figures
+├── assets/                   # paper framework and ablation figures
 ├── examples/                 # synthetic messages and command-line demo
 ├── tests/                    # regression checks without paid API calls
-└── .github/workflows/ci.yml   # lint, tests and packaging
+└── .github/workflows/ci.yml   # lint, tests, packaging and offline demo
 ```
 
 ## Benchmarks
@@ -258,7 +258,8 @@ EvoG supports **EverMemBench** and **GroupMemBench** with official scoring proto
 episode-ID selection, per-question memory isolation and paired candidate validation.
 `--trials N` repeats each question independently; `--resume` continues an interrupted checkpoint
 with matching inputs and runtime. Both note layers are isolated for every benchmark trial.
-See [the benchmark guide](docs/benchmarks.md) for dataset setup and evaluation commands.
+Provide a local EverMemBench root containing `dataset/`, or a GroupMemBench root containing
+`data/final/` and `questions/`. Use `uv run evog benchmark --help` for run and cycle options.
 
 ```bash
 uv run evog benchmark list evermembench --data-root /path/to/EverMemBench --topic 01 --limit 2
@@ -266,14 +267,37 @@ uv run evog benchmark cycle groupmembench --data-root /path/to/GroupMemBench-mai
   --domain Finance --question-type multi_hop --limit 2 --output results.json
 ```
 
-## Documentation and Development
+## Prompts and Runtime Contracts
 
-- [Paper notes and result sources](docs/paper.md)
-- [Architecture and operational boundaries](docs/architecture.md)
-- [Deployment configuration](docs/configuration.md)
-- [Benchmark evaluation](docs/benchmarks.md)
-- [Release validation](docs/release-validation.md)
-- [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
+| Stage | Prompt | Loaded by | Model output |
+| --- | --- | --- | --- |
+| Group interaction | [group.md](src/evog/prompts/group.md) | `runtime.py` via the active harness | `FINAL ANSWER`, `CONFIDENCE`, conditional `ANSWER BIAS` |
+| Pre-feedback reflection | [reflect.md](src/evog/prompts/reflect.md) | `runtime.py` | Reflection JSON |
+| Trace diagnosis | [analyze.md](src/evog/prompts/analyze.md) | `analysis.py` | Diagnosis JSON with inspected evidence ranges |
+| Finding synthesis | [synthesize.md](src/evog/prompts/synthesize.md) | `analysis.py` | Findings JSON from included failure diagnoses |
+| Harness revision | [evolve.md](src/evog/prompts/evolve.md) | `evolution.py` | Plan JSON over permitted files |
+
+The system message for answering combines the active harness's `group.md` with the fixed
+`GROUNDING` contract in [runtime.py](src/evog/runtime.py). The initial harness copies the packaged
+group prompt; changing that file changes new workspaces, while existing workspaces use their
+versioned prompt. Only the group prompt and reusable skills are evolvable policy surfaces.
+Analysis, reflection and evolution prompts stay in the fixed runtime and receive their typed
+JSON schemas at call time. Answering remains plain text. Confidence at or below 0.5 requires an
+`ANSWER BIAS` block of at least 80 characters. Multiple-choice adapters request the option letter
+in `FINAL ANSWER` and retain the remaining protocol fields.
+
+Answering has five scoped tools; archived response chunks are read with `read_file`,
+`target="workspace"`, and a `tool_results/...` resource path. Diagnosis and revision use
+`inspect_trace`, `search_trace`, and `read_tool_result` for read-only trace access. Revision also
+has `read_analysis`, `register_finding`, and `validate_revision`. Standard answers and judge
+instructions are supplied only to the evaluation stage.
+
+Text answers do not carry a structured citation list, so citation-count checks apply to the
+compatible structured-answer path. Text answers still receive grounding instructions, confidence
+and size validation, and a record of delivered evidence. Evidence delivery alone does not prove
+the answer's semantic correctness.
+
+## Development
 
 ```bash
 uv run pytest
@@ -283,9 +307,4 @@ uv build
 ```
 
 Private conversations, traces, and feedback live in `.evog/`, which is excluded from Git.
-Citation checks establish that a source record was delivered, rather than proving semantic
-correctness. Live provider compatibility and business quality require deployment validation.
-
-## License
-
-EvoG is licensed under [MIT](LICENSE). Third-party notices are listed in [NOTICE](NOTICE).
+Live provider compatibility and business quality require deployment validation.

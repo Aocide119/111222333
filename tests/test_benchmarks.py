@@ -13,6 +13,22 @@ from evog.errors import ContractError, ProviderError
 from evog.providers import ModelReply
 
 
+def test_multiple_choice_prompt_preserves_text_answer_protocol():
+    episode = Episode(
+        benchmark="evermembench",
+        episode_id="choice-1",
+        question="Which schedule was selected?",
+        gold="private-reference-answer",
+        options={"A": "Monday", "B": "Tuesday"},
+        scope="01",
+        question_type="choice",
+    )
+    prompt = episode.prompt()
+    assert "option letter after FINAL ANSWER:" in prompt
+    assert "CONFIDENCE" in prompt and "ANSWER BIAS" in prompt
+    assert "JSON" not in prompt and episode.gold not in prompt
+
+
 def test_evermem_adapter_preserves_gold_outside_messages(tmp_path):
     root = tmp_path / "evermem"
     (root / "dataset" / "01").mkdir(parents=True)

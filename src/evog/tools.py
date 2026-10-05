@@ -105,7 +105,7 @@ def tool_definitions() -> list[dict[str, Any]]:
 
 
 def _public_schema(name: str, model: type[Record]) -> dict[str, Any]:
-    """Expose the Desktop/AHE argument surface while retaining legacy aliases internally."""
+    """Expose scoped logical resources while retaining legacy aliases internally."""
     schema = model.model_json_schema()
     for key in ("path", "offset", "limit", "terms"):
         schema.get("properties", {}).pop(key, None)
@@ -232,6 +232,8 @@ class Tools:
         if target == "memory_store":
             return "memory_store/" + resource_path if resource_path else "memory_store/"
         if target in {"skills", "workspace"}:
+            if target == "workspace" and resource_path.startswith("tool_results/"):
+                return resource_path
             return target + "/" + resource_path if resource_path else target + "/"
         raise ContractError("Unknown logical resource root")
 
@@ -275,7 +277,9 @@ class Tools:
         prefix = self._logical_path(args.target, args.resource_path)
         names = [name for name in self.files() if name.startswith(prefix)]
         if args.target == "workspace":
-            names = []
+            names = sorted(
+                name for name in self.results.paths if name.startswith(args.resource_path)
+            )
         if args.target == "memory_units":
             names = [name for name in names if name.startswith("memory_units/")]
         start = args.offset

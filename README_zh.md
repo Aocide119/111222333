@@ -6,13 +6,12 @@
 
 **交互 · 分析 · 演化**
 
-<a href="docs/paper.md"><img alt="论文" src="https://img.shields.io/badge/Paper-EvoGroup-b31b1b?style=flat"></a>
-<a href="LICENSE"><img alt="许可" src="https://img.shields.io/badge/License-MIT-22c55e?style=flat"></a>
+<a href="#实验结果"><img alt="论文" src="https://img.shields.io/badge/Paper-EvoGroup-b31b1b?style=flat"></a>
 <img alt="Python" src="https://img.shields.io/badge/Python-3.11%2B-3b82f6?style=flat&logo=python&logoColor=white">
 <img alt="版本" src="https://img.shields.io/badge/Version-0.1.0-a855f7?style=flat">
 <img alt="使用方式" src="https://img.shields.io/badge/Interface-CLI-0891b2?style=flat">
 
-[论文](docs/paper.md) · [概述](#概述) · [方法](#方法) · [实验结果](#实验结果) · [快速开始](#快速开始) · [English](README.md)
+[论文结果](#实验结果) · [概述](#概述) · [方法](#方法) · [实验结果](#实验结果) · [快速开始](#快速开始) · [English](README.md)
 
 </div>
 
@@ -35,12 +34,12 @@ pass@1 从 **71.07% 提升至 89.58%，增加 18.51 个百分点**。论文同�
 ## 方法
 
 <p align="center">
-  <img src="docs/assets/evog-framework.png" alt="EvoGroup 四阶段自演化流程" width="1100">
+  <img src="assets/evog-framework.png" alt="EvoGroup 四阶段自演化流程" width="1100">
 </p>
 
 ### 1. 交互：生成回答与经验
 
-群助手使用当前 Harness **Hₜ** 回答共享上下文中的问题，保存工具调用轨迹、回答与主观置信度。
+群助手使用当前 Harness $H_t$ 回答共享上下文中的问题，保存工具调用轨迹、回答与主观置信度。
 模型侧回答采用稳定的文本协议：`FINAL ANSWER`、`CONFIDENCE`，以及低置信度时的
 `ANSWER BIAS`；运行时会在 SQLite 中保存解析后的字段和原始响应。低置信度回答会在**获得外部反馈之前**生成反思，说明已经检索的证据、尚未解决的事实与不确定性来源。
 
@@ -85,18 +84,18 @@ pass@1 从 **71.07% 提升至 89.58%，增加 18.51 个百分点**。论文同�
 | **Policy** | 选择什么、何时执行、按什么顺序执行 | 群助手 prompt 与通用 Markdown skills |
 | **Intervention** | 执行边界的检查或转换 | 引用要求、部分回答的置信度与回答长度限制 |
 
-修订后的 **Hₜ₊₁** 保存为新版本，并用于后续交互。源消息、模型参数、预算和核心证据校验保持固定。
+修订后的 $H_{t+1}$ 保存为新版本，并用于后续交互。源消息、模型参数、预算和核心证据校验保持固定。
 当前版本通过声明式配置表达修订，支持原子激活、过期计划检查与回滚。
 逐项变更清单保留预期修复、风险与实际结果。评测循环在激活前配对验证候选；拒绝出现回归的候选后，
 可恢复到曾经激活且评测条件相同的最佳版本。
 
 ## 实验结果
 
-以下表格与图片展示 **EvoGroup 论文**中的实验结果。评测设置与结果来源见[论文说明](docs/paper.md)。
+以下表格与图片展示 **EvoGroup 论文**中的实验结果。评测设置与结果来源见[图表来源](assets/README.md)。
 
 ### EverMemBench
 
-主结果表报告的 pass@1（%）。**H₀** 为初始 Harness，**H*** 为已评估并选出的 Harness。
+主结果表报告的 pass@1（%）。$H_0$ 为初始 Harness，$H_{*}$ 为已评估并选出的 Harness。
 加粗表示该模型列中最高的已报告聚合结果。
 
 | 方法 | GPT-5.5 | DeepSeek-V4-Flash | GLM-5.1 |
@@ -107,18 +106,18 @@ pass@1 从 **71.07% 提升至 89.58%，增加 18.51 个百分点**。论文同�
 | MemRL | 61.54 | 55.92 | 57.33 |
 | Codex | **85.67** | 82.63 | 77.88 |
 | Claude Code | 84.58 | 85.75 | 76.46 |
-| EvoGroup H₀ | 68.33 | 71.07 | 68.27 |
-| EvoGroup H* | 84.52 | **89.58** | **83.63** |
-| **H₀ → H* 增量** | **+16.19 pp** | **+18.51 pp** | **+15.36 pp** |
+| EvoGroup $H_0$ | 68.33 | 71.07 | 68.27 |
+| EvoGroup $H_{*}$ | 84.52 | **89.58** | **83.63** |
+| **$H_0$ → $H_{*}$ 增量** | **+16.19 pp** | **+18.51 pp** | **+15.36 pp** |
 
 论文描述了从 2,400 道 EverMemBench 问题中固定抽取 720 道用于演化，以及另外 1,680 道留出问题。
-上述数值沿用主表报告的聚合口径，本仓库没有重新计算。GPT-5.5 的 H* 在该表中仍低于 Codex 和 Claude Code。
+上述数值沿用主表报告的聚合口径，本仓库没有重新计算。GPT-5.5 的 $H_{*}$ 在该表中仍低于 Codex 和 Claude Code。
 
 ### 冻结迁移至 GroupMemBench
 
 演化后的 Harness 在没有进一步演化或调参的条件下迁移。论文报告 745 道问题及以下聚合结果：
 
-| 模型 | H₀ | 冻结后的 H* | 增量 |
+| 模型 | $H_0$ | 冻结后的 $H_{*}$ | 增量 |
 | --- | ---: | ---: | ---: |
 | GPT-5.5 | 61.88% | 63.89% | +2.01 pp |
 | DeepSeek-V4-Flash | 74.09% | 71.14% | −2.95 pp |
@@ -132,22 +131,22 @@ pass@1 从 **71.07% 提升至 89.58%，增加 18.51 个百分点**。论文同�
 **41.5% 的 token 消耗**。
 
 <p align="center">
-  <img src="docs/assets/harness-ablation.png" alt="论文中的 Harness 组件消融结果" width="900">
+  <img src="assets/harness-ablation.png" alt="论文中的 Harness 组件消融结果" width="900">
 </p>
 
 上图保留论文原始组件消融图，比较单个演化组件替换初始 Harness 后的表现。
 该设置下，工具和 prompt 的单项增益最大。过程消融还表明，移除 APD 或归桶分析会降低表现，
 而轨迹筛选在已测试设置中的收益有限。
-图表详情及数据来源见[结果来源](docs/paper.md#source-notes)。
+图表详情及数据来源见[结果来源](assets/README.md)。
 
 ## 快速开始
 
 ### 安装
 
-下述命令需要 **Python 3.11+** 和 [uv](https://docs.astral.sh/uv/)。在仓库根目录执行：
+使用 **Python 3.11+** 和 [uv](https://docs.astral.sh/uv/)，在仓库根目录执行：
 
 ```bash
-uv sync --extra dev
+uv sync --locked --extra dev
 uv run evog --help
 ```
 
@@ -160,6 +159,9 @@ source .venv/bin/activate
 python -m pip install -e '.[dev]'
 evog --help
 ```
+
+Windows PowerShell 使用 `.venv\Scripts\Activate.ps1` 激活环境。
+激活后，将后续命令中的 `uv run evog` 替换为 `evog`。
 
 </details>
 
@@ -223,11 +225,10 @@ EvoG/
 │   ├── store.py              # 消息、轨迹、反馈与版本保存
 │   ├── providers.py          # 模型调用
 │   └── prompts/              # 交互、反思、分析、综合与演化
-├── docs/                     # 论文说明、架构与配置
-│   └── assets/               # 框架图与消融结果图
+├── assets/                   # 论文框架图、消融结果图及来源
 ├── examples/                 # 合成消息与命令行演示
 ├── tests/                    # 无付费模型调用的回归检查
-└── .github/workflows/ci.yml   # 检查、测试与构建
+└── .github/workflows/ci.yml   # 检查、测试、构建与离线演示
 ```
 
 ## Benchmark 评测
@@ -236,7 +237,8 @@ EvoG 支持 **EverMemBench** 与 **GroupMemBench**，提供官方评分规则、
 逐题独立记忆会话与候选版本的配对验证。标准答案仅用于评测。
 `--trials N` 为每题执行多次独立运行；`--resume` 在输入和运行代码一致时恢复中断的评测。
 每次评测运行都隔离长期与工作记忆。
-数据准备和评测命令详见 [benchmark 指南](docs/benchmarks.md)。
+EverMemBench 的本地数据根目录需包含 `dataset/`；GroupMemBench 需包含 `data/final/`
+和 `questions/`。运行与循环参数可通过 `uv run evog benchmark --help` 查看。
 
 ```bash
 uv run evog benchmark list evermembench --data-root /path/to/EverMemBench --topic 01 --limit 2
@@ -244,14 +246,33 @@ uv run evog benchmark cycle groupmembench --data-root /path/to/GroupMemBench-mai
   --domain Finance --question-type multi_hop --limit 2 --output results.json
 ```
 
-## 文档与开发
+## Prompt 与运行约束
 
-- [论文说明与结果来源](docs/paper.md)
-- [架构与运行边界](docs/architecture.md)
-- [部署配置](docs/configuration.md)
-- [Benchmark 评测](docs/benchmarks.md)
-- [版本验证记录](docs/release-validation.md)
-- [贡献指南](CONTRIBUTING.md) · [安全说明](SECURITY.md)
+| 阶段 | Prompt 文件 | 加载位置 | 模型输出 |
+| --- | --- | --- | --- |
+| 群问答 | [group.md](src/evog/prompts/group.md) | `runtime.py`，读取当前 Harness | `FINAL ANSWER`、`CONFIDENCE`、条件式 `ANSWER BIAS` |
+| 反馈前反思 | [reflect.md](src/evog/prompts/reflect.md) | `runtime.py` | Reflection JSON |
+| 轨迹诊断 | [analyze.md](src/evog/prompts/analyze.md) | `analysis.py` | 包含已检查证据范围的 Diagnosis JSON |
+| 发现综合 | [synthesize.md](src/evog/prompts/synthesize.md) | `analysis.py` | 从实际提供的失败诊断生成 Findings JSON |
+| Harness 演化 | [evolve.md](src/evog/prompts/evolve.md) | `evolution.py` | 限于允许文件的 Plan JSON |
+
+答题阶段的 system message 由当前 Harness 中的 `group.md` 与
+[runtime.py](src/evog/runtime.py) 中固定的 `GROUNDING` 合同共同组成。初始 Harness 会复制
+随代码提供的群问答 prompt；修改该文件影响新工作区，已有工作区继续读取版本化 prompt。
+可演化的策略文件包括群问答 prompt 与通用 skills；分析、反思、演化 prompt 属于固定运行时，
+调用时附加对应的 JSON schema。答题保持文本协议，置信度不超过 0.5 时必须提供至少 80 字符的
+`ANSWER BIAS`。选择题在 `FINAL ANSWER` 中只填写选项字母，同时保留其余协议字段。
+
+答题阶段使用五个有范围约束的工具。截断结果的归档块通过 `read_file` 读取，指定
+`target="workspace"` 和 `tool_results/...` 相对资源路径。诊断与演化阶段通过
+`inspect_trace`、`search_trace`、`read_tool_result` 只读检查轨迹；演化还提供
+`read_analysis`、`register_finding`、`validate_revision`。标准答案与 judge 指令仅在评分阶段提供。
+
+文本回答不携带结构化引用列表，因此引用数量校验适用于兼容的结构化回答路径。
+文本回答仍接收证据约束，并执行置信度和长度校验、保存实际送达的证据记录。
+证据送达本身不能证明回答语义正确。
+
+## 开发
 
 ```bash
 uv run pytest
@@ -261,8 +282,4 @@ uv build
 ```
 
 私有消息、轨迹与反馈保存在 Git 忽略的 `.evog/` 中。
-引用检查验证来源已送达模型，语义正确性仍需验证；实际模型端点和业务质量需要部署时检查。
-
-## 许可
-
-EvoG 采用 [MIT](LICENSE) 许可，第三方许可声明见 [NOTICE](NOTICE)。
+实际模型端点和业务质量需要部署时检查。

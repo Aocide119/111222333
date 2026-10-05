@@ -36,5 +36,6 @@ do not shorten its ranges or reconstruct it from memory.
 Choose query_family from the supplied stable semantic categories; query_type is only a short
 descriptive label. Explain an observed mechanism or the specific evidence still missing, not
 just run metadata. When a tool event has context_result, that field is what the model received;
-result preserves the complete archived output. Use read_tool_result before claiming the agent saw
-omitted content. Do not assume omitted output was observed.
+result preserves the complete archived output. Use read_tool_result to inspect omitted content
+and compare it with context_result. Reading an archive during analysis does not show that the
+answering agent saw it; only a later delivered read in its trace can establish that.

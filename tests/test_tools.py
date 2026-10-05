@@ -304,6 +304,39 @@ def test_result_archives_are_scoped_read_only_and_cannot_be_overwritten(store):
         first.execute("write_file", {"path": path, "content": "forged source"})
 
 
+def test_archived_chunks_are_readable_through_public_tool_arguments(store):
+    store.ingest(
+        iter(
+            [
+                Message.model_validate(
+                    {**DEMO_MESSAGES[0], "message_id": "large", "text": "release " + "x" * 3000}
+                )
+            ]
+        )
+    )
+    tools = Tools(store, store.harness(), ["demo-team"], max_output_chars=1024)
+    source = tools.execute("list_files", {"target": "memory_units"})["files"][0]
+    preview = tools.execute(
+        "read_file", {"target": "memory_units", "resource_path": source["resource_path"]}
+    )
+    assert preview["truncated"] and not tools.delivered_refs
+    listing = tools.execute(
+        "list_files", {"target": "workspace", "resource_path": preview["first_chunk"]}
+    )
+    assert listing["files"]
+    chunks = sorted(path for path in tools.results.paths if "chunk_" in path)
+    for path in chunks:
+        result = tools.execute("read_file", {"target": "workspace", "resource_path": path})
+        assert result["lines"] and not result["truncated"]
+        assert len(dumps(result)) <= 1024
+    assert "demo-team/large" in tools.delivered_refs
+    other = Tools(store, store.harness(), ["demo-team"])
+    with pytest.raises(ContractError, match="scope"):
+        other.execute("read_file", {"target": "workspace", "resource_path": chunks[0]})
+    with pytest.raises(ContractError, match="scope"):
+        tools.execute("read_file", {"target": "workspace", "resource_path": "config.toml"})
+
+
 def test_representation_and_operation_extensions_change_executed_views(store):
     tools = tools_for(
         store,

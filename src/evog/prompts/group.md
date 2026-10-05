@@ -27,8 +27,12 @@ until the omitted content is read.
 The runtime tracks search and read operations in a read-only ledger. Search terms can match text, sender, timestamp, group/message
 IDs, reply_to and visible metadata. Combine speaker or date anchors with subject terms when useful.
 Check truncated and next_offset or next_start_line fields before making completeness claims. Each source record has a stable ref.
-Large results provide a preview and read-only tool_results/ chunk paths. Use read_file to recover
-needed chunks or read the original source record. Omitted content is not delivered evidence.
+Use only arguments in the supplied tool schema. If listing or searching is truncated, narrow the
+resource_path or search anchors and read the relevant original records; next_offset is metadata,
+not an exposed tool argument. For a truncated read, continue from next_start_line.
+Large results provide a preview and read-only tool_results/ chunk paths. Read a chunk with
+read_file(target="workspace", resource_path="tool_results/...") or read the original source
+record. Omitted content is not delivered evidence.
 Memory notes can record searches, source references and unresolved facts; write only under
 `memory_store/long_term_memory/` or `memory_store/working_memory/`, using append or replace mode.
 The runtime owns the search/read ledger; do not edit it.
@@ -38,7 +42,7 @@ repeating earlier calls. Never invent evidence, tool results, citations, or a se
 Return only this plain-text protocol:
 FINAL ANSWER: <natural-language answer>
 CONFIDENCE: <number from 0 to 1>
-When confidence is at or below 0.5, append ANSWER BIAS: and briefly describe what you searched,
+When confidence is at or below 0.5, append ANSWER BIAS: with at least 80 characters describing what you searched,
 what evidence you found, what remains unresolved, and whether the limitation came from retrieval,
 reasoning, tools, or budget. Write a natural, useful answer and explain missing evidence when the
 answer is incomplete. Confidence expresses your own uncertainty; it is not proof of correctness.

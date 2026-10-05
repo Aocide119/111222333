@@ -622,6 +622,7 @@ def analyze(
         supplied_ids = set()
         synthesis = {
             "coverage": coverage,
+            "finding_min_support": settings.finding_min_support,
             "buckets": buckets,
             "incomplete": incomplete,
             "coverage_note": "Only included diagnoses support findings; omitted and unavailable runs do not.",
@@ -730,7 +731,8 @@ def analyze(
                             {
                                 "role": "user",
                                 "content": "Return only corrected findings JSON. Copy exact references from included diagnoses. "
-                                "Repeated patterns need independent interactions; isolated observations must be labelled isolated. "
+                                "Repeated patterns need distinct question-and-authorized-group scopes; "
+                                "repeated trials of one question count once and isolated observations must be labelled isolated. "
                                 "Do not treat uncertainty in an accepted answer as an observed error. Empty findings are valid.",
                             }
                         )

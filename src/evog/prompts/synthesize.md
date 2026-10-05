@@ -8,15 +8,19 @@ Return JSON with a findings array matching the supplied schema. An empty array i
 the evidence does not support a useful change.
 Return only the JSON object, without markdown fences, commentary or additional fields.
 Copy evidence references exactly from the supplied diagnoses.
-Buckets separate error_repair from uncertainty_calibration and use stable query families.
-An accepted uncertain answer is not an observed failure. Repeated findings require at least two
-independent target interactions, not two ranges from one interaction or a successful control.
+The supplied buckets use stable query families and contain error_repair diagnoses. Accepted or
+unjudged low-confidence interactions are retained separately as calibration diagnoses and are
+not default synthesis input. Do not infer their contents from coverage counts.
+An accepted uncertain answer is not an observed failure. Repeated findings require the configured
+minimum support (at least two distinct question-and-authorized-group scopes). Repeated trials of
+one question in the same scope count once; two ranges from one trial or a successful control do
+not provide independent error support.
 Label a supported one-case observation isolated and state its limits. Unavailable or omitted
 diagnoses cannot support a finding. Preserve supplied coverage limits and avoid invented causes.
 
 Prioritize diagnoses whose run has an observed `verifier` rejection, output-contract failure,
 budget exhaustion, or timeout: these form the error-repair input. A diagnosis for an accepted but
-low-confidence run is uncertainty calibration; use it to explain fragile confidence and do not
+low-confidence run is uncertainty calibration; if explicitly supplied, use it to explain fragile confidence and do not
 turn it into a failure or repair unless independent rejected or timeout trials show the same
 mechanism. When a trial group contains both outcomes, compare the inspected trials and state
 which behavior repeats. Missing diagnoses stay in `incomplete` and reduce the coverage claim;
