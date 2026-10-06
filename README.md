@@ -159,10 +159,19 @@ uv run evog apply PLAN_ID
 
 ## Evaluation
 
-The benchmark adapters load question episodes and source corpora from the supplied dataset root. Product runs use `benchmark run` or `benchmark cycle`; paper campaigns use `benchmark campaign`. Results are written as JSON checkpoints with the selected episode IDs, deployment settings, per-question outcomes, and aggregate metrics.
+The benchmark adapters load question episodes and source corpora from the supplied dataset root. Runing uses `benchmark run` or `benchmark cycle`; paper campaigns use `benchmark campaign`. Results are written as JSON checkpoints with the selected episode IDs, deployment settings, per-question outcomes, and aggregate metrics.
 
 The evaluation layer keeps benchmark memory isolated per question and validates candidate checkpoints before activation. Standard answers are used by the evaluator and are not included in agent context.
 
+`benchmark transfer` loads the selected EverMemBench checkpoint's complete five-component workspace and evaluated memory snapshot for frozen GroupMemBench evaluation. The model configuration is retained; transfer runs in a separate workspace with feedback and memory writeback disabled.
+
+~~~bash
+uv run evog --config examples/paper.toml \
+  --workspace .evog-campaign benchmark transfer groupmembench \
+  --data-root /path/to/GroupMemBench \
+  --campaign-checkpoint results/evermem-campaign.json \
+  --checkpoint best --all --output results/groupmem-transfer.json
+~~~
 
 ## Repository Structure
 
@@ -191,7 +200,7 @@ EvoGroup/
 │   ├── evaluation/              # benchmark adapters, judges, metrics, and splits
 │   │   ├── runner.py             # benchmark runs and paired candidate evaluation
 │   │   ├── campaign.py           # evolution rounds and checkpoint selection
-│   │   └── frozen.py             # held-out evaluation
+│   │   └── frozen.py             # frozen held-out and transfer evaluation
 │   └── core/                    # configuration, model transport, contracts, and storage
 ├── examples/                    # input data and configuration templates
 │   ├── messages.jsonl          # minimal group-message input

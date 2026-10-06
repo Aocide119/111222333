@@ -29,7 +29,8 @@ def test_candidate_tool_implementation_changes_executed_behavior(store):
             "tools/implementations/grep_search.py": 'def execute(payload, ctx):\n    return {"matches": [], "total_matches": 0, "candidate_behavior": True}\n'
         },
     )
-    assert tools.execute("grep_search", {"query": "User_1"}) == {
+    result = tools.execute("grep_search", {"query": "User_1"})
+    assert {key: result[key] for key in ("matches", "total_matches", "candidate_behavior")} == {
         "matches": [],
         "total_matches": 0,
         "candidate_behavior": True,

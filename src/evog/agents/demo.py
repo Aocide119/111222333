@@ -170,10 +170,10 @@ class DemoProvider:
         return ModelReply(
             content=dumps(
                 {
-                    "text": latest["text"],
+                    "text": latest.get("text", latest.get("dialogue", latest.get("content", ""))),
                     "confidence": 0.5,
                     "status": "complete",
-                    "citations": [latest["ref"]],
+                    "citations": [result["matches"][-1]["ref"]],
                 }
             )
         )

@@ -41,7 +41,7 @@ def execute(payload, ctx):
         # The ledger is runtime-owned metadata, not conversation evidence;
         # excluding it also prevents a broad search from feeding previous
         # search terms back into later searches.
-        if path.endswith("search_ledger.jsonl"):
+        if path.endswith(("search_ledger.jsonl", "state.json", "evidence_links.jsonl")):
             continue
         for document in documents(ctx, path):
             for local_index, line in enumerate(document["lines"]):
@@ -101,15 +101,15 @@ def execute(payload, ctx):
                 row["context"] = [
                     {
                         "ref": item["ref"],
-                        "text": dumps(item)[: operations.excerpt_chars],
-                        "truncated": len(dumps(item)) > operations.excerpt_chars,
+                        "text": item["source_line"][: operations.excerpt_chars],
+                        "truncated": len(item["source_line"]) > operations.excerpt_chars,
                     }
                     for item in neighborhood
                 ]
                 row_refs.update(
                     item["ref"]
                     for item in neighborhood
-                    if len(dumps(item)) <= operations.excerpt_chars
+                    if len(item["source_line"]) <= operations.excerpt_chars
                 )
         size = len(dumps(row))
         if response_chars + size > 60000:

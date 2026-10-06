@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Any, Literal
 
@@ -12,6 +13,32 @@ class Record(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class SourceRecord(Record):
+    """Original JSON message and its location, separate from normalized retrieval fields."""
+
+    record: dict[str, Any]
+    scope: dict[str, str]
+    resource: str = Field(min_length=1, max_length=512)
+    position: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def bounded_json(self) -> SourceRecord:
+        try:
+            encoded = json.dumps(self.record, ensure_ascii=False, allow_nan=False)
+            size = len(encoded.encode("utf-8"))
+        except (TypeError, ValueError, RecursionError, UnicodeError) as exc:
+            raise ValueError("Source records must contain finite JSON values") from exc
+        if size > 131072:
+            raise ValueError("Original source record exceeds the byte limit")
+        if (
+            self.resource.startswith("/")
+            or "\\" in self.resource
+            or any(part in {"", ".", ".."} for part in self.resource.split("/"))
+        ):
+            raise ValueError("Source resource must be a logical relative path")
+        return self
+
+
 class Message(Record):
     group_id: str = Field(min_length=1, max_length=128, pattern=r"^[^\s/\\\x00-\x1f]+$")
     message_id: str = Field(min_length=1, max_length=128, pattern=r"^[^\s/\\\x00-\x1f]+$")
@@ -20,6 +47,7 @@ class Message(Record):
     text: str = Field(min_length=1, max_length=20000)
     reply_to: str | None = Field(default=None, max_length=128, pattern=r"^[^\s/\\\x00-\x1f]+$")
     metadata: dict[str, str] = Field(default_factory=dict, max_length=32)
+    source: SourceRecord | None = None
 
     @field_validator("sender", "text")
     @classmethod

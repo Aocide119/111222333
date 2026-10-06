@@ -161,6 +161,15 @@ Benchmark 适配器从数据目录读取题目 episode 和源语料。产品运�
 
 评测层按题目隔离 Benchmark 记忆，并在激活前验证候选 checkpoint。标准答案只供评测器使用，不会进入智能体上下文。
 
+`benchmark transfer` 加载选定 EverMemBench checkpoint 的完整五组件 workspace 和已评测记忆快照，冻结迁移至 GroupMemBench。模型配置保持不变；迁移在独立工作目录中运行，关闭反馈和记忆回写。
+
+~~~bash
+uv run evog --config examples/paper.toml \
+  --workspace .evog-campaign benchmark transfer groupmembench \
+  --data-root /path/to/GroupMemBench \
+  --campaign-checkpoint results/evermem-campaign.json \
+  --checkpoint best --all --output results/groupmem-transfer.json
+~~~
 ## 仓库结构
 
 ~~~text
@@ -188,7 +197,7 @@ EvoGroup/
 │   ├── evaluation/              # Benchmark 适配、裁判、指标与划分
 │   │   ├── runner.py             # Benchmark 运行与配对候选评测
 │   │   ├── campaign.py           # 演化轮次与 checkpoint 选择
-│   │   └── frozen.py             # 留出评测
+│   │   └── frozen.py             # 冻结留出评测与迁移评测
 │   └── core/                    # 配置、模型调用、数据契约与存储
 ├── examples/                    # 输入数据与配置模板
 │   ├── messages.jsonl          # 最小群消息输入

@@ -219,6 +219,8 @@ def run_campaign(
     output = Path(output).resolve()
     if not episodes or len({e.episode_id for e in episodes}) != len(episodes):
         raise ContractError("Campaign requires unique, nonempty evolution episodes")
+    if len({e.benchmark for e in episodes}) != 1:
+        raise ContractError("A campaign requires a single source benchmark")
     if type(evaluation_rounds) is not int or not 1 <= evaluation_rounds <= 100:
         raise ContractError("Evaluation rounds must be within 1–100")
     if type(seed) is not int or seed < 0:
@@ -267,6 +269,7 @@ def run_campaign(
             )
         payload = {
             "schema": "evog.research-campaign.v1",
+            "benchmark": episodes[0].benchmark,
             "split_manifest_fingerprint": split_manifest.get("manifest_fingerprint")
             if split_manifest
             else None,
@@ -307,7 +310,12 @@ def run_campaign(
         app.store.save_artifact(
             payload["id"],
             "research_campaign",
-            {"id": payload["id"], "signature": signature, "output": str(output)},
+            {
+                "id": payload["id"],
+                "signature": signature,
+                "output": str(output),
+                "benchmark": episodes[0].benchmark,
+            },
         )
     else:
         if not output.exists():
@@ -329,7 +337,12 @@ def run_campaign(
             app.store.save_artifact(
                 payload["id"],
                 "research_campaign",
-                {"id": payload["id"], "signature": signature, "output": str(output)},
+                {
+                    "id": payload["id"],
+                    "signature": signature,
+                    "output": str(output),
+                    "benchmark": episodes[0].benchmark,
+                },
             )
         if payload["status"] == "completed":
             return payload

@@ -1,6 +1,8 @@
 name: read_file
 description: Read a one-based line range from one allowed text file. Use the same
-  target and resource_path returned by list_files or grep_search.
+  target and resource_path returned by list_files or grep_search. Optional state_update
+  registers question obligations, evidence-backed resolutions and anchors in the read-only
+  runtime state.
 parameters:
   additionalProperties: false
   properties:
@@ -29,8 +31,101 @@ parameters:
       - type: 'null'
       default: null
       title: End Line
+    state_update:
+      anyOf:
+      - $ref: '#/$defs/StateUpdate'
+      - type: 'null'
+      default: null
   title: ReadArgs
   type: object
   required:
   - target
   - resource_path
+  $defs:
+    Obligation:
+      additionalProperties: false
+      properties:
+        id:
+          maxLength: 64
+          minLength: 1
+          pattern: ^[a-zA-Z0-9][a-zA-Z0-9_-]*$
+          title: Id
+          type: string
+        description:
+          maxLength: 512
+          minLength: 1
+          title: Description
+          type: string
+        parent_id:
+          anyOf:
+          - maxLength: 64
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Parent Id
+      required:
+      - id
+      - description
+      title: Obligation
+      type: object
+    Resolution:
+      additionalProperties: false
+      properties:
+        id:
+          maxLength: 64
+          minLength: 1
+          title: Id
+          type: string
+        status:
+          enum:
+          - satisfied
+          - waived
+          title: Status
+          type: string
+        evidence_refs:
+          items:
+            type: string
+          maxItems: 64
+          title: Evidence Refs
+          type: array
+        search_ids:
+          items:
+            type: string
+          maxItems: 20
+          title: Search Ids
+          type: array
+        reason:
+          maxLength: 1024
+          minLength: 1
+          title: Reason
+          type: string
+      required:
+      - id
+      - status
+      - reason
+      title: Resolution
+      type: object
+    StateUpdate:
+      additionalProperties: false
+      properties:
+        obligations:
+          items:
+            $ref: '#/$defs/Obligation'
+          maxItems: 32
+          title: Obligations
+          type: array
+        resolutions:
+          items:
+            $ref: '#/$defs/Resolution'
+          maxItems: 32
+          title: Resolutions
+          type: array
+        anchors:
+          items:
+            type: string
+          maxItems: 32
+          title: Anchors
+          type: array
+      title: StateUpdate
+      type: object

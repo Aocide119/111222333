@@ -7,6 +7,7 @@ import time
 from collections.abc import Callable
 from datetime import UTC
 from importlib.resources import files
+from pathlib import PurePosixPath
 from typing import Annotated, Any, Literal
 from uuid import uuid4
 
@@ -19,10 +20,15 @@ from evog.core.models import Message, Record
 from evog.core.store import Store
 from evog.harness.memory import QuestionMemory
 from evog.harness.schema import Harness
+from evog.harness.state import QuestionState, StateUpdate, memory_guides
 from evog.harness.tool_results import ToolResults
 
 
-class ListArgs(Record):
+class StatefulArgs(Record):
+    state_update: StateUpdate | None = None
+
+
+class ListArgs(StatefulArgs):
     target: Literal["workspace", "memory_units", "memory_store", "skills"] = "workspace"
     resource_path: str = ""
     max_depth: int = Field(default=3, ge=1, le=10)
@@ -30,7 +36,7 @@ class ListArgs(Record):
     limit: int = Field(default=20, ge=1, le=50, exclude=True)
 
 
-class ReadArgs(Record):
+class ReadArgs(StatefulArgs):
     target: Literal["workspace", "memory_units", "memory_store", "skills"] = "memory_units"
     resource_path: str = ""
     start_line: int = Field(default=1, ge=1)
@@ -38,7 +44,9 @@ class ReadArgs(Record):
     limit: int | None = Field(default=None, ge=1, le=50, exclude=True)
 
 
-class SearchArgs(Record):
+class SearchArgs(StatefulArgs):
+    obligation_id: str | None = Field(default=None, min_length=1, max_length=64)
+    parent_id: str | None = Field(default=None, min_length=1, max_length=64)
     target: Literal["memory_units", "memory_store"] = "memory_units"
     resource_path: str = ""
     query: str = ""
@@ -51,7 +59,7 @@ class SearchArgs(Record):
     offset: int = Field(default=0, ge=0, exclude=True)
 
 
-class WriteArgs(Record):
+class WriteArgs(StatefulArgs):
     target: Literal["memory_store"] = "memory_store"
     resource_path: str = ""
     content: str = Field(max_length=16000)
@@ -59,7 +67,7 @@ class WriteArgs(Record):
     mode: Literal["append", "replace"] = "append"
 
 
-class CreateArgs(Record):
+class CreateArgs(StatefulArgs):
     target: Literal["memory_store"] = "memory_store"
     resource_path: str = ""
     content: str = Field(max_length=16000)
@@ -67,10 +75,12 @@ class CreateArgs(Record):
     path: str | None = Field(default=None, exclude=True)
 
 
-class QueryToolArgs(Record):
+class QueryToolArgs(StatefulArgs):
     """Public arguments shared by every declarative Operation query tool."""
 
     query: str = Field(min_length=1, max_length=256)
+    obligation_id: str | None = Field(default=None, min_length=1, max_length=64)
+    parent_id: str | None = Field(default=None, min_length=1, max_length=64)
     patterns: list[str] = Field(default_factory=list, max_length=8)
     selected_patterns: list[str] = Field(default_factory=list, max_length=2)
     required_pattern_groups: list[Annotated[list[str], Field(min_length=1, max_length=8)]] = Field(
@@ -128,12 +138,25 @@ def _registry(harness: Harness | None) -> tuple[dict[str, str], list[dict]]:
     return contents, [row for row in registry["tools"] if row.get("enabled", True)]
 
 
+def _description(contents: dict[str, str], entry: dict) -> dict:
+    description = yaml.safe_load(contents[entry["description_file"]])
+    if entry["name"] in ARGUMENTS:
+        # Question state is a fixed runtime contract, including for revised tool schemas.
+        schema = ARGUMENTS[entry["name"]][0].model_json_schema()
+        parameters = description["parameters"]
+        parameters.setdefault("$defs", {}).update(schema["$defs"])
+        for key in ("state_update", "obligation_id", "parent_id"):
+            if key in schema["properties"]:
+                parameters.setdefault("properties", {})[key] = schema["properties"][key]
+    return description
+
+
 def tool_definitions(harness: Harness | None = None) -> list[dict[str, Any]]:
     """Load authoritative candidate tool descriptions and declarative queries."""
     contents, registry = _registry(harness)
     definitions = []
     for entry in registry:
-        description = yaml.safe_load(contents[entry["description_file"]])
+        description = _description(contents, entry)
         definitions.append({"type": "function", "function": description})
     if harness is not None:
         for query_tool in harness.operations.query_tools:
@@ -196,6 +219,7 @@ class Tools:
         output_transform: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
         defer_delivery: bool = False,
         component_deadline: float | None = None,
+        question: str = "",
     ):
         if not group_ids:
             raise ContractError("Explicit group scope is required")
@@ -211,16 +235,34 @@ class Tools:
         # Each source view is frozen at interaction start, even if a later import occurs.
         self.context: dict[str, list[dict[str, Any]]] = {}
         self.group_paths = {}
+        self._source_lines: dict[str, list[str]] = {}
+        self._source_locations: dict[str, dict] = {}
         for group in sorted(set(group_ids)):
             path = f"memory_units/{fingerprint(group)}.jsonl"
             self.group_paths[path] = group
-            self.context[path] = [self._record(message) for message in store.messages(group)]
-        self._source_lines = {
-            path: [dumps(row) for row in rows] for path, rows in self.context.items()
-        }
-        self._source_refs = {
-            dumps(row): row["ref"] for rows in self.context.values() for row in rows
-        }
+            messages = store.messages(group)
+            self.context[path] = [self._record(message) for message in messages]
+            self._source_lines[path] = []
+            for index, message in enumerate(messages, 1):
+                record = self._record(message)
+                if message.source is not None:
+                    record = dict(message.source.record)
+                    for key, value in message.source.scope.items():
+                        record.setdefault(key, value)
+                self._source_lines[path].append(dumps(record))
+                self._source_locations[message.ref] = {
+                    "ref": message.ref,
+                    "path": path,
+                    "line": index,
+                    "source": message.source.model_dump(exclude={"record"})
+                    if message.source is not None
+                    else None,
+                }
+        self._source_refs: dict[str, set[str]] = {}
+        for path, rows in self.context.items():
+            for index, row in enumerate(rows):
+                for text in (dumps(row), self._source_lines[path][index]):
+                    self._source_refs.setdefault(text, set()).add(row["ref"])
         # Keep durable notes separate from per-question scratch state. Long-term notes are scoped
         # to the authorized groups and survive question sessions; working memory is session-scoped
         # when a caller supplies ``memory_session``.
@@ -247,6 +289,10 @@ class Tools:
                 raise ContractError("Frozen memory requires matching groups and private staging")
             frozen_memory.seed(self.long_term_root)
         self.search_ledger_path = self.working_root / "search_ledger.jsonl"
+        self.state = QuestionState(self.working_root, question, group_ids)
+        if any(self._source_locations.get(ref) != row for ref, row in self.state.evidence.items()):
+            raise ContractError("Question evidence ledger differs from its authorized sources")
+        self.guides = memory_guides(harness)
         self.delivered_refs: set[str] = set()
         result_root = safe_path(store.workspace, "tool_results/" + (result_session or uuid4().hex))
         self.results = ToolResults(result_root, max_output_chars)
@@ -255,6 +301,8 @@ class Tools:
 
     def _record(self, message: Message) -> dict[str, Any]:
         row = message.model_dump(mode="json")
+        if message.source is None:
+            row.pop("source")
         if not self.harness.representation.include_metadata:
             row.pop("metadata")
         row["ref"] = message.ref
@@ -281,13 +329,14 @@ class Tools:
                     notes.append(prefix + relative)
         skills = [name for name in self.harness.contents if name.startswith("skills/")]
         return sorted(
-            [
+            {
                 *self.context,
                 *notes,
+                *self.guides,
                 *skills,
                 *self.results.paths,
                 *("workspace/" + name for name in self.harness.contents),
-            ]
+            }
         )
 
     @staticmethod
@@ -303,6 +352,8 @@ class Tools:
         raise ContractError("Unknown logical resource root")
 
     def _lines(self, path: str) -> list[str]:
+        if path in self.guides:
+            return self.guides[path].splitlines()
         if (
             path.startswith("workspace/")
             and path.removeprefix("workspace/") in self.harness.contents
@@ -328,7 +379,14 @@ class Tools:
             )
         if root is not None:
             actual = safe_path(root, relative)
-            if actual.stat().st_size > 64000:
+            read_limit = (
+                196608
+                if actual == self.state.path
+                else 4000000
+                if actual == self.state.evidence_path
+                else 64000
+            )
+            if actual.stat().st_size > read_limit:
                 raise ContractError("Note exceeds the read limit")
             return actual.read_text(encoding="utf-8").splitlines()
         raise ContractError("Path is not available in the authorized scope")
@@ -424,11 +482,15 @@ class Tools:
             window = payload.get("window", 0)
             if not isinstance(window, int) or not 0 <= window <= 5:
                 raise ContractError("Source context window exceeds capability limit")
-            return rows[max(0, index - window) : index + window + 1]
+            return [
+                {**rows[i], "source_line": self._source_lines[source][i]}
+                for i in range(max(0, index - window), min(len(rows), index + window + 1))
+            ]
         if name == "note_state":
             arguments = payload.get("arguments", {})
             args = WriteArgs.model_validate(arguments)
             logical = self._logical_path(args.target, args.resource_path)
+            self._check_note_write(logical)
             if not self._allowed(logical, readable):
                 raise ContractError("Tool note-read capability is outside registry scope")
             resource = args.resource_path
@@ -442,8 +504,6 @@ class Tools:
             if root is None:
                 raise ContractError("Notes require a writable memory layer")
             path = safe_path(root, resource.partition("/")[2])
-            if path.name == "search_ledger.jsonl":
-                raise ContractError("The search ledger is runtime-owned and read-only")
             if path.exists() and path.stat().st_size > 64000:
                 raise ContractError("Note exceeds the read limit")
             return {
@@ -457,6 +517,7 @@ class Tools:
             model = CreateArgs if create else WriteArgs
             args = model.model_validate(arguments)
             logical = self._logical_path(args.target, args.resource_path)
+            self._check_note_write(logical)
             if not self._allowed(logical, writable):
                 raise ContractError("Tool write capability is outside registry scope")
             return self._write(args, create=bool(create))
@@ -478,7 +539,7 @@ class Tools:
                     collect(item)
 
         collect(result)
-        refs = {self._source_refs[text] for text in strings if text in self._source_refs}
+        refs = set().union(*(self._source_refs.get(text, set()) for text in strings))
         # An archived result is evidence only after authentic complete lines/chunks
         # are returned to the model, never merely requested by candidate code.
         path = result.get("path")
@@ -530,7 +591,7 @@ class Tools:
             description_path = entry["description_file"]
             baseline = _default_bundle().get(description_path)
             if contents[description_path] != baseline:
-                description = yaml.safe_load(contents[description_path])
+                description = _description(contents, entry)
                 _validate_arguments(arguments, description["parameters"])
                 model = ARGUMENTS[name][0]
                 args = model.model_validate(
@@ -548,6 +609,21 @@ class Tools:
         payload = dict(args.__dict__) if args is not None else dict(arguments)
         if name in ARGUMENTS and entry["name"] == name:
             payload.update(payload_extension)
+        update = args.state_update if args is not None else None
+        obligation_id = getattr(args, "obligation_id", None)
+        parent_id = getattr(args, "parent_id", None)
+        prepared = self.state.prepare(
+            update,
+            obligation_id=obligation_id,
+            parent_id=parent_id,
+            description=getattr(args, "query", "")
+            or ", ".join(getattr(args, "selected_patterns", []) or getattr(args, "patterns", []))
+            or dumps(getattr(args, "required_pattern_groups", [])),
+            delivered=self.delivered_refs,
+        )
+        if args is not None:
+            for key in ("state_update", "obligation_id", "parent_id"):
+                payload.pop(key, None)
         capability_errors = []
 
         def capability(name, data):
@@ -582,6 +658,17 @@ class Tools:
             raise ContractError(str(exc)) from exc
         if not isinstance(result, dict):
             raise ContractError("Tool implementation must return a JSON object")
+        if entry["name"] == "grep_search":
+            result["search_id"] = self.state.record_search(
+                prepared, {**payload, "obligation_id": obligation_id}, result
+            )
+        self.state.commit(prepared)
+        if update is not None or obligation_id is not None:
+            result["question_state"] = {
+                "open_obligations": self.state.open_ids,
+                "anchors": self.state.data["anchors"],
+                "path": "memory_store/working_memory/state.json",
+            }
         if self.output_transform is not None:
             result = self.output_transform(result)
             if not isinstance(result, dict):
@@ -604,7 +691,7 @@ class Tools:
                 for path, read in archive_reads.items():
                     self.results.archives[path]["read"] = read
             else:
-                self.delivered_refs.update(refs)
+                self._deliver(refs)
             return result
         for path, read in archive_reads.items():
             self.results.archives[path]["read"] = read
@@ -621,9 +708,23 @@ class Tools:
         """
         if not isinstance(rendered, dict):
             raise ContractError("Delivered tool result must be a JSON object")
-        self.delivered_refs.update(self._visible_refs(rendered))
+        self._deliver(self._visible_refs(rendered))
+
+    def _deliver(self, refs: set[str]) -> None:
+        self.delivered_refs.update(refs)
+        self.state.record_evidence(refs, self._source_locations)
+
+    def _check_note_write(self, logical: str) -> None:
+        logical = PurePosixPath(logical).as_posix()
+        if logical in self.guides or logical in {
+            "memory_store/working_memory/state.json",
+            "memory_store/working_memory/evidence_links.jsonl",
+            "memory_store/working_memory/search_ledger.jsonl",
+        }:
+            raise ContractError("Memory guides and runtime ledgers are read-only")
 
     def _write(self, args: WriteArgs | CreateArgs, create: bool) -> dict[str, Any]:
+        self._check_note_write(self._logical_path(args.target, args.resource_path))
         resource = args.resource_path
         relative = resource.removeprefix("memory_store/")
         if relative.startswith("working_memory/"):
@@ -634,8 +735,6 @@ class Tools:
             raise ContractError(
                 "Writes are limited to writable memory_store long_term_memory/ and working_memory/"
             )
-        if relative == "search_ledger.jsonl":
-            raise ContractError("The search ledger is runtime-owned and read-only")
         path = safe_path(root, relative)
         if path.suffix not in (".md", ".txt", ".json", ".jsonl"):
             raise ContractError("Navigation notes must be text files")
@@ -643,7 +742,11 @@ class Tools:
             if create and path.exists() and not getattr(args, "overwrite", False):
                 raise FileExistsError("Note already exists")
             append = not create and getattr(args, "mode", "replace") == "append"
-            sources = {row["ref"]: row["text"] for rows in self.context.values() for row in rows}
+            sources = {
+                row["ref"]: [row["text"], self._source_lines[path][index]]
+                for path, rows in self.context.items()
+                for index, row in enumerate(rows)
+            }
             content = self.frozen_memory.validate_and_stage(
                 relative,
                 args.content,

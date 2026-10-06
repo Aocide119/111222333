@@ -6,6 +6,7 @@ import json
 import time
 from collections import Counter
 from collections.abc import Callable
+from datetime import UTC, datetime
 from threading import Event
 from typing import Any
 from uuid import uuid4
@@ -34,6 +35,15 @@ FINAL ANSWER: <natural-language answer>
 CONFIDENCE: <number from 0 to 1>
 If confidence is at or below 0.5, append ANSWER BIAS: and explain what was searched, what was
 found, what is missing, and whether the limitation was retrieval, reasoning, tools, or budget.
+Read memory_store/README.md and the relevant category README before writing notes.
+The read-only working_memory/state.json and evidence_links.jsonl are owned by the runtime.
+On any tool call, state_update may declare obligations [{id, description, parent_id}],
+resolve them [{id, status: satisfied|waived, evidence_refs, search_ids, reason}] in resolutions,
+and retain anchors. Evidence refs must already be fully delivered in a previous call.
+grep_search may address one obligation_id and its parent_id. Declare the parent first and
+satisfy or waive it before searching a child. Each successful search returns a search_id;
+waivers need observed evidence or recorded searches for that obligation. Read state.json
+after context compaction to recover your obligations and anchors.
 """
 
 # Keep the per-question safety boundary even when a caller mutates ``Settings``
@@ -137,6 +147,7 @@ def interact(
         ),
         defer_delivery=True,
         component_deadline=deadline,
+        question=question,
     )
     store.start_run(run_id, harness.id, question, sorted(set(group_ids)))
     if run_started is not None:
@@ -153,7 +164,14 @@ def interact(
         },
     )
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": harness.system_prompt + "\n" + GROUNDING},
+        {
+            "role": "system",
+            "content": harness.system_prompt.replace(
+                "{{ date }}", datetime.now(UTC).date().isoformat()
+            ).replace("{{ working_directory }}", "workspace/")
+            + "\n"
+            + GROUNDING,
+        },
         {"role": "user", "content": dumps({"question": question, "authorized_groups": group_ids})},
     ]
     messages[0]["content"] += "\nMemory component policy:\n" + harness.memory_policy
@@ -206,6 +224,16 @@ def interact(
         context: list[dict[str, Any]], available: list[dict[str, Any]]
     ) -> tuple[Any, list[dict[str, Any]]]:
         check_deadline()
+        if tools.state.data["obligations"] or tools.state.data["anchors"]:
+            context = [dict(message) for message in context]
+            context[1]["content"] = dumps(
+                {
+                    "question": question,
+                    "authorized_groups": group_ids,
+                    "memory_layout": harness.memory_layout,
+                    "question_state": tools.state.summary(),
+                }
+            )
         target_chars = int(settings.max_context_chars * settings.context_trim_ratio)
         processed = middleware.before_model(context, settings.max_context_chars, target_chars)
         check_deadline()
@@ -318,6 +346,9 @@ def interact(
                         attempted = True
                         try:
                             effective_arguments = middleware.before_tool(call.name, call.arguments)
+                            for key in ("state_update", "obligation_id", "parent_id"):
+                                if key in call.arguments:
+                                    effective_arguments[key] = call.arguments[key]
                             check_deadline()
                             signature = dumps({"name": call.name, "arguments": effective_arguments})
                             repeated[signature] += 1

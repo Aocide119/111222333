@@ -16,7 +16,7 @@ from pydantic import Field
 
 from evog.core.errors import ContractError
 from evog.core.io import dumps, fingerprint, safe_path
-from evog.core.models import Message, Record
+from evog.core.models import Message, Record, SourceRecord
 
 BenchmarkName = Literal["evermembench", "groupmembench"]
 GROUP_DOMAINS = ("Finance", "Technology", "Healthcare", "Manufacturing")
@@ -237,6 +237,7 @@ def load_corpus(
     source = safe_path(root, relative)
     payload = json.loads(source.read_text(encoding="utf-8"))
     messages: list[Message] = []
+    positions: dict[str, int] = {}
     # EverMemBench nests messages by date and group; GroupMemBench nests by channel.
     scopes = payload.get("dialogues", payload) if name == "evermembench" else {scope: payload}
     if not isinstance(scopes, dict):
@@ -271,15 +272,26 @@ def load_corpus(
                     message_id = str(row["msg_node"])
                     text, sender, stamp = row["content"], row["author"], row["timestamp"]
                     reply_to = row.get("reply_to")
-                    # Preserve domain-specific fields as searchable metadata.
-                    metadata = {
-                        k: v if isinstance(v, str) else dumps(v)
-                        for k, v in row.items()
-                        if k not in {"msg_node", "content", "author", "timestamp", "reply_to"}
-                    }
-                    metadata.update({"group": group, "domain": scope, "source_timestamp": stamp})
+                    # The bounded retrieval index is separate from the complete source record.
+                    metadata = {"group": group, "domain": scope, "source_timestamp": stamp}
+                    for key, value in row.items():
+                        if key in {
+                            "msg_node",
+                            "content",
+                            "author",
+                            "timestamp",
+                            "reply_to",
+                            *metadata,
+                        }:
+                            continue
+                        encoded = value if isinstance(value, str) else dumps(value)
+                        if len(key) <= 128 and len(encoded) <= 4000 and len(metadata) < 31:
+                            candidate = {**metadata, key: encoded}
+                            if len(str(candidate)) <= 15000:
+                                metadata = candidate
                 if datetime.fromisoformat(stamp.replace("Z", "+00:00")).tzinfo is None:
                     metadata["assumed_timezone"] = assumed_timezone
+                positions[group_id] = positions.get(group_id, 0) + 1
                 messages.append(
                     Message(
                         group_id=group_id,
@@ -289,6 +301,15 @@ def load_corpus(
                         text=text,
                         reply_to=reply_to,
                         metadata=metadata,
+                        source=SourceRecord(
+                            record=row,
+                            scope={
+                                "group": group,
+                                "date" if name == "evermembench" else "domain": date_or_domain,
+                            },
+                            resource=relative,
+                            position=positions[group_id],
+                        ),
                     )
                 )
     return Corpus(messages, source)

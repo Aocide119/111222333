@@ -136,7 +136,7 @@ class QuestionMemory:
         name: str,
         content: str,
         delivered: set[str],
-        sources: dict[str, str],
+        sources: dict[str, str | list[str]],
         *,
         append: bool = False,
     ) -> str:
@@ -154,7 +154,9 @@ class QuestionMemory:
                 ref, excerpt = entry["ref"], entry["excerpt"]
                 if not isinstance(ref, str) or not isinstance(excerpt, str) or not excerpt.strip():
                     raise ValueError
-                if ref not in delivered or ref not in sources or excerpt not in sources[ref]:
+                originals = sources.get(ref, [])
+                originals = [originals] if isinstance(originals, str) else originals
+                if ref not in delivered or not any(excerpt in original for original in originals):
                     raise ValueError
         except (ValueError, TypeError, KeyError):
             raise ContractError(

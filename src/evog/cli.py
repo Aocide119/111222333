@@ -65,7 +65,8 @@ def parser() -> argparse.ArgumentParser:
     )
     benchmark = sub.add_parser("benchmark", help="Run the paper benchmark adapters")
     benchmark.add_argument(
-        "action", choices=("list", "run", "cycle", "split", "campaign", "held-out", "rejudge")
+        "action",
+        choices=("list", "run", "cycle", "split", "campaign", "held-out", "transfer", "rejudge"),
     )
     benchmark.add_argument("name", choices=("evermembench", "groupmembench"))
     benchmark.add_argument(
@@ -115,12 +116,12 @@ def parser() -> argparse.ArgumentParser:
     benchmark.add_argument(
         "--allow-small-cohort",
         action="store_true",
-        help="Explicitly test a cohort outside the 2400/720/1680 paper sizes",
+        help="Explicitly test a cohort outside the paper evolution, held-out or transfer sizes",
     )
     benchmark.add_argument(
         "--campaign-checkpoint",
         type=Path,
-        help="Completed campaign JSON for frozen held-out evaluation",
+        help="Completed campaign JSON for frozen held-out or transfer evaluation",
     )
     benchmark.add_argument("--checkpoint", choices=("baseline", "best"), default="best")
     return root
@@ -138,6 +139,7 @@ def main(argv: list[str] | None = None) -> int:
         research = args.command == "benchmark" and args.action in {
             "campaign",
             "held-out",
+            "transfer",
             "rejudge",
         }
         settings = Settings.load(args.config, profile="paper" if research else "product")
@@ -147,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         if (
             args.command == "benchmark"
-            and args.action in {"held-out", "rejudge"}
+            and args.action in {"held-out", "transfer", "rejudge"}
             and args.campaign_checkpoint
         ):
             archived = json.loads(args.campaign_checkpoint.read_text(encoding="utf-8"))
@@ -248,6 +250,48 @@ def main(argv: list[str] | None = None) -> int:
                             for episode in episodes
                         ]
                     )
+                elif args.action == "transfer":
+                    from evog.evaluation.frozen import evaluate_transfer
+
+                    if args.name != "groupmembench" or not args.campaign_checkpoint:
+                        raise ValueError(
+                            "Transfer requires GroupMemBench and --campaign-checkpoint"
+                        )
+                    if args.manifest or args.validation_episode_file or args.trials != 1:
+                        raise ValueError(
+                            "Transfer uses a fixed target cohort and one trial per question"
+                        )
+                    episodes = load_episodes(args.name, root, **selected)
+                    corpora = {
+                        scope: load_corpus(args.name, root, scope, args.timezone)
+                        for scope in sorted({e.scope for e in episodes})
+                    }
+                    campaign = json.loads(args.campaign_checkpoint.read_text(encoding="utf-8"))
+                    output = args.output or app.store.workspace.parent / (
+                        app.store.workspace.name + f"-transfer-{args.checkpoint}.json"
+                    )
+                    result = evaluate_transfer(
+                        app,
+                        campaign,
+                        episodes,
+                        corpora,
+                        output=output,
+                        checkpoint=args.checkpoint,
+                        resume=args.resume,
+                        allow_small_cohort=args.allow_small_cohort,
+                        progress=lambda message: print(message, file=sys.stderr, flush=True),
+                    )
+                    emit(
+                        {
+                            "status": result["status"],
+                            "output": str(output.resolve()),
+                            "revision_id": result["revision_id"],
+                            "workspace_snapshot_fingerprint": result[
+                                "workspace_snapshot_fingerprint"
+                            ],
+                            "metrics": result["metrics"],
+                        }
+                    )
                 elif args.action in {"split", "campaign", "held-out", "rejudge"}:
                     from evog.evaluation.campaign import run_campaign
                     from evog.evaluation.frozen import evaluate_frozen
@@ -302,10 +346,11 @@ def main(argv: list[str] | None = None) -> int:
                             scope: load_corpus(args.name, root, scope, args.timezone)
                             for scope in sorted({e.scope for e in cohort})
                         }
-                        output = args.output or app.store.workspace / (
-                            "campaign.json"
+                        output = args.output or (
+                            app.store.workspace / "campaign.json"
                             if args.action == "campaign"
-                            else f"held-out-{args.checkpoint}.json"
+                            else app.store.workspace.parent
+                            / (app.store.workspace.name + f"-held-out-{args.checkpoint}.json")
                         )
 
                         def progress(message: str) -> None:

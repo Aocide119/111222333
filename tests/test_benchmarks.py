@@ -110,6 +110,115 @@ def test_groupmem_adapter_maps_questions_and_reply_metadata(tmp_path):
     assert load_corpus("groupmembench", root, "Finance").group_ids == [messages[0].group_id]
 
 
+@pytest.mark.parametrize("benchmark", ["evermembench", "groupmembench"])
+def test_original_message_fields_and_order_survive_import_and_search(tmp_path, benchmark):
+    from evog.harness.memory import MemoryRound
+    from evog.harness.schema import Harness
+    from evog.harness.tools import Tools
+
+    if benchmark == "evermembench":
+        scope, relative = "01", "dataset/01/dialogue.json"
+        rows = [
+            {
+                "dialogue": "release update",
+                "speaker": "A",
+                "time": "2025-01-01 12:00:00",
+                "message_index": 23,
+            },
+            {
+                "dialogue": "release bridge",
+                "speaker": "B",
+                "time": "2025-01-01 09:00:00",
+                "message_index": 9,
+            },
+        ]
+        payload = {"dialogues": {"2025-01-01": {"Channel": rows}}}
+        promoted = {"date": "2025-01-01", "group": "Channel"}
+    else:
+        scope = "Finance"
+        relative = "data/final/Finance/synthetic_domain_channels_rolevariants_Finance.json"
+        rows = [
+            {
+                "content": "release update",
+                "author": "A",
+                "timestamp": "2025-01-01T12:00:00",
+                "msg_node": "Msg_23",
+            },
+            {
+                "content": "release bridge",
+                "author": "B",
+                "timestamp": "2025-01-01T09:00:00",
+                "msg_node": "Msg_9",
+                "reply_to": "Msg_23",
+            },
+        ]
+        payload = {"Channel": rows}
+        promoted = {"domain": "Finance", "group": "Channel"}
+    rows[0]["extra"] = {"tags": ["native", 7, False, None], "owner": {"role": "lead"}}
+    rows[0]["large_field"] = "z" * 5000
+    path = tmp_path / relative
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(payload))
+    corpus = load_corpus(benchmark, tmp_path, scope, "Asia/Shanghai")
+    with Application(tmp_path / "workspace", provider=DemoProvider()) as app:
+        app.ingest(iter(corpus.messages))
+        contents = dict(app.store.harness().contents)
+        contents["memory/representation.json"] = json.dumps(
+            {"include_metadata": False, "timestamp_view": "utc"}
+        )
+        contents["tools/operations.json"] = json.dumps({"excerpt_chars": 4000})
+        memory = MemoryRound(app.store.workspace, None, "native-source")
+        tools = Tools(
+            app.store,
+            Harness(contents),
+            corpus.group_ids,
+            memory_session="native",
+            isolated_long_term=True,
+            frozen_memory=memory.binding(corpus.group_ids, "q"),
+        )
+        source_path = next(iter(tools.context))
+        assert [json.loads(line) for line in tools._lines(source_path)] == [
+            {**row, **promoted} for row in rows
+        ]
+        assert "metadata" not in tools.context[source_path][0]
+        assert [m.source.record for m in app.store.messages(corpus.group_ids[0])] == rows
+        result = tools.execute("grep_search", {"query": "release"})
+        assert [row["excerpt"] for row in result["matches"]] == [
+            line[:4000] for line in tools._lines(source_path)
+        ]
+        assert result["matches"][0]["excerpt_truncated"]
+        assert corpus.messages[0].ref not in tools.delivered_refs
+        read = tools.execute(
+            "read_file",
+            {
+                "resource_path": source_path.removeprefix("memory_units/"),
+                "start_line": 2,
+                "end_line": 2,
+            },
+        )
+        assert json.loads(read["lines"][0]["text"]) == {**rows[1], **promoted}
+        first = tools.execute(
+            "read_file",
+            {
+                "resource_path": source_path.removeprefix("memory_units/"),
+                "end_line": 1,
+            },
+        )
+        assert json.loads(first["lines"][0]["text"]) == {**rows[0], **promoted}
+        evidence = [json.loads(line) for line in tools.state.evidence_path.read_text().splitlines()]
+        assert {item["source"]["position"] for item in evidence} == {1, 2}
+        assert all(item["source"]["resource"] == relative for item in evidence)
+        tools.execute(
+            "write_file",
+            {
+                "resource_path": "long_term_memory/events/native.json",
+                "content": json.dumps(
+                    {"entries": [{"ref": corpus.messages[0].ref, "excerpt": "native"}]}
+                ),
+            },
+        )
+
+
 @pytest.fixture
 def ever_root(tmp_path):
     root = tmp_path / "evermem"

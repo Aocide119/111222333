@@ -137,13 +137,18 @@ class Store:
 
     def messages(self, group_id: str) -> list[Message]:
         with self.connect() as db:
-            return [
+            messages = [
                 Message.model_validate_json(row["payload"])
                 for row in db.execute(
                     "SELECT payload FROM messages WHERE group_id=? ORDER BY timestamp,message_id",
                     (group_id,),
                 )
             ]
+        # Source-backed corpora retain their original within-group message order.
+        # Product messages without source locations retain chronological ordering.
+        if messages and all(message.source is not None for message in messages):
+            messages.sort(key=lambda message: (message.source.resource, message.source.position))
+        return messages
 
     def harness(self, revision_id: str | None = None) -> Harness:
         with self.connect() as db:
