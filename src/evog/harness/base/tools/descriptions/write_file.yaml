@@ -1,0 +1,32 @@
+name: write_file
+description: Append or replace a UTF-8 note under memory_store/long_term_memory/ or
+  working_memory/. Source records and runtime state are read-only.
+parameters:
+  additionalProperties: false
+  properties:
+    target:
+      const: memory_store
+      default: memory_store
+      title: Target
+      type: string
+    resource_path:
+      default: ''
+      title: Resource Path
+      type: string
+    content:
+      maxLength: 16000
+      title: Content
+      type: string
+    mode:
+      default: append
+      enum:
+      - append
+      - replace
+      title: Mode
+      type: string
+  required:
+  - target
+  - resource_path
+  - content
+  title: WriteArgs
+  type: object

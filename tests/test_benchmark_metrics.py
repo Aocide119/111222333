@@ -1,7 +1,7 @@
 import pytest
 
-from evog.benchmark_metrics import research_compare, research_metrics, token_total
-from evog.errors import ContractError
+from evog.core.errors import ContractError
+from evog.evaluation.metrics import research_compare, research_metrics, token_total
 
 
 def row(key, passed, status="completed", **costs):

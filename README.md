@@ -20,11 +20,11 @@ EvoGroup operates over shared, multi-user context. Source messages remain the ev
 
 ## 🔄 Self-Evolution Loop
 
-The paper defines EvoGroup as a four-stage self-evolution loop: interaction, trajectory selection, analysis, and harness revision. The base model stays fixed while the Harness changes from `$H_0$` through evaluated checkpoints.
+The paper defines EvoGroup as a four-stage self-evolution loop: interaction, trajectory selection, analysis, and harness revision. The base model stays fixed while the Harness changes from $H_0$ through evaluated checkpoints.
 
 ### 1. 🧭 Interaction
 
-The Group Agent uses the current Harness `$H_t$` to answer a query over shared group context. The interaction records the query, observations, reasoning or tool-use actions, final answer, and subjective confidence. The initial cold start contains five tools—`list_files`, `read_file`, `grep_search`, `write_file`, and `create_file`—with empty skills and memory.
+The Group Agent uses the current Harness $H_t$ to answer a query over shared group context. The interaction records the query, observations, reasoning or tool-use actions, final answer, and subjective confidence. The initial cold start contains five tools—`list_files`, `read_file`, `grep_search`, `write_file`, and `create_file`—with empty skills and memory.
 
 When confidence is at or below the paper's threshold of 0.5, the Group Agent produces a self-reflection before external supervision is revealed. This reflection is diagnostic evidence; it does not change the official correctness label.
 
@@ -56,11 +56,12 @@ The paper calls this stage **Multi-Interface Harness Revision**. The Evolve Agen
 - **Intervention:** checks, transformations, or constraints at execution boundaries;
 - **Policy:** rules controlling what to select, when to execute it, and in what order.
 
-Operation revisions may register additional bounded query tools through `operations.json`. Each
-entry is compiled by the fixed runtime from a declared search schema; it cannot execute Python,
-shell commands, imports, or arbitrary runtime code.
+The harness contains five file-based components: **Memory, Tools, Skills, Prompt, and
+Middleware**. The Evolve Agent edits a candidate workspace, including tool and middleware
+Python implementations, and links each change to inspected evidence. Components execute in
+separate working directories and processes; directory isolation is not an OS security sandbox.
 
-A candidate `$H_{t+1}$` remains a proposal until it is executed and evaluated in the next round. Each change carries a manifest with its evidence, predicted repair, and regression risks. The best evaluated checkpoint is selected as `$H_{*}$`; if no candidate passes validation, the current Harness is retained.
+A candidate $H_{t+1}$ remains a proposal until it is executed and evaluated in the next round. Each change carries a manifest with its evidence, predicted repair, and regression risks. The best evaluated checkpoint is selected as $H_{*}$; if no candidate passes validation, the current Harness is retained.
 
 ## Installation
 
@@ -71,7 +72,7 @@ uv sync --locked --extra dev
 uv run evog --help
 ~~~
 
-The public interface is the `evog` command-line program. The repository does not require an SDK.
+The public interface is the `evog` command-line program.
 
 ## Data Preparation
 
@@ -131,7 +132,7 @@ uv run evog ask "What is the latest release schedule?" --group product
 
 ## Reproducing Main Results
 
-The paper reports EverMemBench pass@1 for the initial checkpoint `$H_0$` and the selected evolved checkpoint `$H_{*}$`. The paper protocol defines the fixed cohort, split, evaluation rounds, and model settings. Prepare the corresponding manifest and dataset checkout before running the campaign.
+The paper reports EverMemBench pass@1 for the initial checkpoint $H_0$ and the selected evolved checkpoint $H_{*}$. The paper protocol defines the fixed cohort, split, evaluation rounds, and model settings. Prepare the corresponding manifest and dataset checkout before running the campaign.
 
 ~~~bash
 uv run evog --config examples/paper.toml \
@@ -154,7 +155,7 @@ uv run evog propose ANALYSIS_ID
 uv run evog apply PLAN_ID
 ~~~
 
-`select` records the eligible experience set, `analyze` creates evidence-linked findings, `propose` creates a bounded revision plan, and `apply` activates a validated checkpoint. `revisions` lists checkpoints; `rollback REVISION_ID` restores one.
+`select` records the eligible experience set, `analyze` creates evidence-linked findings, `propose` edits and validates a candidate component bundle, and `apply` activates a validated checkpoint. `revisions` lists checkpoints; `rollback REVISION_ID` restores one.
 
 ## Evaluation
 
@@ -168,31 +169,40 @@ The evaluation layer keeps benchmark memory isolated per question and validates 
 ~~~text
 EvoGroup/
 ├── src/evog/
-│   ├── cli.py                  # evog command-line entry point
-│   ├── app.py                  # command orchestration
-│   ├── runtime.py              # group interaction and trace creation
-│   ├── memory.py               # scoped long-term and working memory
-│   ├── tools.py                # bounded evidence and navigation tools
-│   ├── analysis.py             # selection, APD, diagnosis, and synthesis
-│   ├── evolution.py            # revision plans and checkpoint activation
-│   ├── harness.py              # four declarative revision interfaces
-│   ├── benchmarks.py           # product benchmark runs and cycles
-│   ├── campaign.py             # paper evolution campaigns
-│   ├── frozen_evaluation.py    # held-out checkpoint evaluation
-│   ├── benchmark_*.py          # loading, judging, metrics, splits, recovery
-│   ├── providers.py            # OpenAI-compatible model transport
-│   ├── store.py                # messages, traces, feedback, and revisions
-│   └── prompts/                # group, analysis, synthesis, and evolution prompts
-├── examples/
+│   ├── cli.py                    # command-line entry point
+│   ├── app.py                    # command orchestration
+│   ├── agents/                   # interaction, analysis, and evolution
+│   │   ├── interaction.py        # answering, budgets, and pre-feedback reflection
+│   │   ├── analysis.py           # trajectory selection, APD, and bucketed synthesis
+│   │   ├── evolution.py          # evidence-linked revision and activation
+│   │   └── prompts/              # reflection, analysis, synthesis, and evolution prompts
+│   ├── harness/                  # component contracts, snapshots, and execution
+│   │   ├── schema.py             # five-component bundle validation
+│   │   ├── workspace.py          # candidate file editing and change registration
+│   │   ├── executor.py           # isolated processes and working directories
+│   │   ├── memory.py             # frozen round memory and staged notes
+│   │   └── base/                 # initial Harness
+│   │       ├── harness.toml      # five component entry points
+│   │       ├── memory/           # policies, layout, representation, and templates
+│   │       ├── tools/            # registry, descriptions, and Python implementations
+│   │       ├── skills/           # empty library; revisions add SKILL.md and references
+│   │       ├── prompt/           # system and group prompts
+│   │       └── middleware/       # registry and execution hooks
+│   ├── evaluation/              # benchmark adapters, judges, metrics, and splits
+│   │   ├── runner.py             # benchmark runs and paired candidate evaluation
+│   │   ├── campaign.py           # evolution rounds and checkpoint selection
+│   │   └── frozen.py             # held-out evaluation
+│   └── core/                    # configuration, model transport, contracts, and storage
+├── examples/                    # input data and configuration templates
 │   ├── messages.jsonl          # minimal group-message input
 │   ├── benchmark.toml          # product configuration template
 │   ├── paper.toml              # research configuration template
 │   └── run_demo.sh             # offline demo launcher
-├── assets/                     # framework and ablation figures
-├── tests/                      # offline regression tests
-├── dist/                       # built wheel and source archive
-├── pyproject.toml              # package metadata and CLI entry point
-└── uv.lock                    # locked Python dependencies
+├── assets/                      # paper figures
+├── tests/                       # regression tests
+├── dist/                        # wheel and source archive
+├── pyproject.toml               # package metadata and CLI entry point
+└── uv.lock                      # locked dependencies
 ~~~
 
 ~~~bash

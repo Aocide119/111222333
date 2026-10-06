@@ -1,12 +1,12 @@
 import json
 
+from evog.agents.demo import DEMO_MESSAGES, DemoProvider
 from evog.app import Application
-from evog.benchmark_data import Corpus, Episode
-from evog.campaign import run_campaign
-from evog.demo import DEMO_MESSAGES, DemoProvider
-from evog.judge_recovery import rejudge_campaign
-from evog.models import Message
-from evog.providers import ModelReply
+from evog.core.models import Message
+from evog.core.providers import ModelReply
+from evog.evaluation.campaign import run_campaign
+from evog.evaluation.data import Corpus, Episode
+from evog.evaluation.recovery import rejudge_campaign
 
 
 def test_explicit_rejudge_uses_existing_answer_and_does_not_evolve(tmp_path):

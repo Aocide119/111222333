@@ -3,9 +3,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from evog.errors import ContractError
-from evog.memory import MemoryRound
-from evog.tools import Tools
+from evog.core.errors import ContractError
+from evog.harness.memory import MemoryRound
+from evog.harness.tools import Tools
 
 
 def note(ref, excerpt):

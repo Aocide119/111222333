@@ -4,14 +4,46 @@ from uuid import uuid4
 
 import pytest
 
-from evog import campaign
+from evog.agents.demo import DEMO_MESSAGES, DemoProvider
 from evog.app import Application
-from evog.benchmark_data import Corpus, Episode
-from evog.demo import DEMO_MESSAGES, DemoProvider
-from evog.errors import ContractError, ProviderError
-from evog.harness import Harness
-from evog.models import AnalysisReport, Answer, Change, EvolutionPlan, Message
-from evog.providers import ModelReply
+from evog.core import identity
+from evog.core.errors import ContractError, ProviderError
+from evog.core.models import AnalysisReport, Answer, Change, EvolutionPlan, Message
+from evog.core.providers import ModelReply
+from evog.evaluation import campaign
+from evog.evaluation.data import Corpus, Episode
+from evog.harness.schema import Harness
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [
+        "agents/interaction.py",
+        "agents/prompts/analyze.md",
+        "harness/base/tools/registry.yaml",
+        "harness/base/tools/operations.json",
+        "harness/base/harness.toml",
+    ],
+)
+def test_campaign_fingerprint_covers_other_packages_and_component_resources(
+    tmp_path, monkeypatch, relative
+):
+    package = tmp_path / "evog"
+    module = package / "core/identity.py"
+    module.parent.mkdir(parents=True)
+    module.write_text("# Fixed kernel\n")
+    resource = package / relative
+    resource.parent.mkdir(parents=True, exist_ok=True)
+    resource.write_text("original\n")
+    monkeypatch.setattr(identity, "__file__", str(module))
+    original = identity.runtime_source_fingerprint()
+    resource.write_text("modified\n")
+    assert identity.runtime_source_fingerprint() != original
+    resource.write_text("original\n")
+    cache = resource.parent / "__pycache__"
+    cache.mkdir()
+    (cache / "compiled.pyc").write_bytes(b"cache-only")
+    assert identity.runtime_source_fingerprint() == original
 
 
 @pytest.fixture
@@ -96,7 +128,7 @@ def setup_campaign(tmp_path, monkeypatch):
         changed = changes[index] if index < len(changes) else False
         edit = Change(
             interface="Policy",
-            path="prompts/group.md",
+            path="prompt/group.md",
             content=f"Prompt revision {index}",
             finding_ids=["synthetic"],
             rationale="general policy",

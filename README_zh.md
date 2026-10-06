@@ -20,11 +20,11 @@ EvoGroup 面向共享、多用户上下文运行。原始消息始终是证据�
 
 ## 🔄 自演化循环
 
-论文将 EvoGroup 定义为四阶段的 self-evolution loop：interaction、trajectory selection、analysis 和 harness revision。基础模型保持不变，Harness 从 `$H_0$` 开始逐步产生并评测新的 checkpoint。
+论文将 EvoGroup 定义为四阶段的 self-evolution loop：interaction、trajectory selection、analysis 和 harness revision。基础模型保持不变，Harness 从 $H_0$ 开始逐步产生并评测新的 checkpoint。
 
 ### 1. 🧭 Interaction
 
-Group Agent 使用当前 Harness `$H_t$` 在共享群组上下文上回答问题。交互记录问题、观察、推理或工具操作、最终回答和主观置信度。初始 cold start 只包含五个工具——`list_files`、`read_file`、`grep_search`、`write_file` 和 `create_file`——技能库与记忆均为空。
+Group Agent 使用当前 Harness $H_t$ 在共享群组上下文上回答问题。交互记录问题、观察、推理或工具操作、最终回答和主观置信度。初始 cold start 只包含五个工具——`list_files`、`read_file`、`grep_search`、`write_file` 和 `create_file`——技能库与记忆均为空。
 
 当置信度不高于论文设定的 0.5 阈值时，Group Agent 会在外部监督结果揭示前生成 self-reflection。该反思只作为诊断证据，不会改变正式正确性标签。
 
@@ -56,9 +56,9 @@ Group Agent 使用当前 Harness `$H_t$` 在共享群组上下文上回答问题
 - **Intervention：** 执行边界上的检查、转换和约束；
 - **Policy：** 控制选择什么、何时执行以及执行顺序的规则。
 
-Operation 修订可以通过 `operations.json` 注册额外的有界查询工具。每个条目由固定运行时按照声明式搜索 schema 编译，不能执行 Python、shell 命令、导入模块或任意运行时代码。
+Harness 由 **Memory、Tools、Skills、Prompt、Middleware** 五类文件组件组成。Evolve Agent 在候选工作目录中编辑组件，包括工具和中间件的 Python 实现，并为每项修改关联已检查的证据。组件在独立工作目录和子进程中运行；目录隔离不等同于操作系统权限沙箱。
 
-候选 `$H_{t+1}$` 在下一轮执行并评测前都只是提案。每项变更都带有证据、预期修复和回归风险清单。最终从已评测 checkpoint 中选择 `$H_{*}$`；没有候选通过验证时，保留当前 Harness。
+候选 $H_{t+1}$ 在下一轮执行并评测前都只是提案。每项变更都带有证据、预期修复和回归风险清单。最终从已评测 checkpoint 中选择 $H_{*}$；没有候选通过验证时，保留当前 Harness。
 
 ## 安装
 
@@ -69,7 +69,7 @@ uv sync --locked --extra dev
 uv run evog --help
 ~~~
 
-公开接口是 `evog` 命令行程序，仓库不要求 SDK。
+公开接口是 `evog` 命令行程序。
 
 ## 数据准备
 
@@ -129,7 +129,7 @@ uv run evog ask "最新的发布计划是什么？" --group product
 
 ## 主结果复现
 
-论文报告初始 checkpoint `$H_0$` 和选出的演化 checkpoint `$H_{*}$` 在 EverMemBench 上的 pass@1。固定题目划分、评测轮数和模型配置由论文协议定义；运行 campaign 前准备对应的 manifest 和数据目录。
+论文报告初始 checkpoint $H_0$ 和选出的演化 checkpoint $H_{*}$ 在 EverMemBench 上的 pass@1。固定题目划分、评测轮数和模型配置由论文协议定义；运行 campaign 前准备对应的 manifest 和数据目录。
 
 ~~~bash
 uv run evog --config examples/paper.toml \
@@ -153,7 +153,7 @@ uv run evog propose ANALYSIS_ID
 uv run evog apply PLAN_ID
 ~~~
 
-`select` 记录符合条件的经验集合，`analyze` 生成带证据关联的发现，`propose` 生成有界修订计划，`apply` 激活通过验证的 checkpoint。`revisions` 列出 checkpoint，`rollback REVISION_ID` 恢复指定版本。
+`select` 记录符合条件的经验集合，`analyze` 生成带证据关联的发现，`propose` 编辑并验证候选组件包，`apply` 激活通过验证的 checkpoint。`revisions` 列出 checkpoint，`rollback REVISION_ID` 恢复指定版本。
 
 ## 评测
 
@@ -166,31 +166,40 @@ Benchmark 适配器从数据目录读取题目 episode 和源语料。产品运�
 ~~~text
 EvoGroup/
 ├── src/evog/
-│   ├── cli.py                  # evog 命令行入口
-│   ├── app.py                  # 命令调度
-│   ├── runtime.py              # 群交互与轨迹创建
-│   ├── memory.py               # 群组长期记忆与题目工作记忆
-│   ├── tools.py                # 有界证据与导航工具
-│   ├── analysis.py             # 筛选、APD、诊断与综合
-│   ├── evolution.py            # 修订计划与 checkpoint 激活
-│   ├── harness.py              # 四类声明式修订接口
-│   ├── benchmarks.py           # 产品 Benchmark 运行与循环
-│   ├── campaign.py             # 论文演化 campaign
-│   ├── frozen_evaluation.py    # 留出集 checkpoint 评测
-│   ├── benchmark_*.py          # 数据加载、评测、指标、划分与恢复
-│   ├── providers.py            # OpenAI 兼容模型传输
-│   ├── store.py                # 消息、轨迹、反馈与修订保存
-│   └── prompts/                # 群交互、分析、综合与演化提示
-├── examples/
+│   ├── cli.py                    # 命令行入口
+│   ├── app.py                    # 命令调度
+│   ├── agents/                   # 交互、分析与演化
+│   │   ├── interaction.py        # 答题、预算与反馈前反思
+│   │   ├── analysis.py           # 轨迹筛选、APD 与归桶综合
+│   │   ├── evolution.py          # 基于证据的修订与激活
+│   │   └── prompts/              # 反思、分析、综合与演化 prompt
+│   ├── harness/                  # 组件契约、快照与执行
+│   │   ├── schema.py             # 五组件包校验
+│   │   ├── workspace.py          # 候选文件编辑与改动登记
+│   │   ├── executor.py           # 独立子进程与工作目录
+│   │   ├── memory.py             # 按轮冻结记忆与暂存笔记
+│   │   └── base/                 # 初始 Harness
+│   │       ├── harness.toml      # 五类组件入口
+│   │       ├── memory/           # 策略、布局、表示与模板
+│   │       ├── tools/            # 注册表、工具描述与 Python 实现
+│   │       ├── skills/           # 初始为空；演化添加 SKILL.md 与参考文件
+│   │       ├── prompt/           # system 与 group prompt
+│   │       └── middleware/       # 注册表与执行 hooks
+│   ├── evaluation/              # Benchmark 适配、裁判、指标与划分
+│   │   ├── runner.py             # Benchmark 运行与配对候选评测
+│   │   ├── campaign.py           # 演化轮次与 checkpoint 选择
+│   │   └── frozen.py             # 留出评测
+│   └── core/                    # 配置、模型调用、数据契约与存储
+├── examples/                    # 输入数据与配置模板
 │   ├── messages.jsonl          # 最小群消息输入
 │   ├── benchmark.toml          # 产品配置模板
-│   ├── paper.toml              # 研究配置模板
-│   └── run_demo.sh             # 离线演示启动脚本
-├── assets/                     # 框架图与消融图
-├── tests/                      # 离线回归测试
-├── dist/                       # wheel 与源码压缩包
-├── pyproject.toml              # 包元数据与 CLI 入口
-└── uv.lock                    # 固定的 Python 依赖
+│   ├── paper.toml              # 论文配置模板
+│   └── run_demo.sh             # 离线演示脚本
+├── assets/                      # 论文图片
+├── tests/                       # 回归测试
+├── dist/                        # wheel 与源码归档
+├── pyproject.toml               # 包元数据与 CLI 入口
+└── uv.lock                      # 依赖锁文件
 ~~~
 
 ~~~bash

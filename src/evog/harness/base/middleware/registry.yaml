@@ -1,0 +1,17 @@
+version: 1
+middleware:
+  - name: context_compaction
+    handler: python:middleware/context_compaction.py:execute
+    hook: before_model
+    enabled: true
+    config: {}
+  - name: long_tool_output
+    handler: python:middleware/long_tool_output.py:execute
+    hook: after_tool
+    enabled: true
+    config: {}
+  - name: budget_reminder
+    handler: python:middleware/budget_reminder.py:execute
+    hook: before_finalize
+    enabled: true
+    config: {}

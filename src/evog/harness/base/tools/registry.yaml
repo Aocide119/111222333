@@ -1,0 +1,45 @@
+version: 1
+tools:
+- name: list_files
+  description_file: tools/descriptions/list_files.yaml
+  handler: python:tools/implementations/list_files.py:execute
+  enabled: true
+  readable_roots:
+  - workspace
+  - memory_units
+  - memory_store
+  - skills
+  writable_roots: []
+- name: read_file
+  description_file: tools/descriptions/read_file.yaml
+  handler: python:tools/implementations/read_file.py:execute
+  enabled: true
+  readable_roots:
+  - workspace
+  - memory_units
+  - memory_store
+  - skills
+  writable_roots: []
+- name: grep_search
+  description_file: tools/descriptions/grep_search.yaml
+  handler: python:tools/implementations/grep_search.py:execute
+  enabled: true
+  readable_roots:
+  - memory_units
+  - memory_store
+  writable_roots: []
+- name: write_file
+  description_file: tools/descriptions/write_file.yaml
+  handler: python:tools/implementations/write_file.py:execute
+  enabled: true
+  readable_roots:
+  - memory_store
+  writable_roots:
+  - memory_store
+- name: create_file
+  description_file: tools/descriptions/create_file.yaml
+  handler: python:tools/implementations/create_file.py:execute
+  enabled: true
+  readable_roots: []
+  writable_roots:
+  - memory_store

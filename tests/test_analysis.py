@@ -4,12 +4,12 @@ from uuid import uuid4
 import pytest
 from conftest import ScriptedProvider
 
-from evog.analysis import InspectArgs, TraceAccess, analyze, diagnose, select_experience
-from evog.demo import DemoProvider
-from evog.errors import ContractError
-from evog.models import Answer, EvidenceRef, Feedback, Reflection
-from evog.providers import ModelReply, ToolCall
-from evog.runtime import interact
+from evog.agents.analysis import InspectArgs, TraceAccess, analyze, diagnose, select_experience
+from evog.agents.demo import DemoProvider
+from evog.agents.interaction import interact
+from evog.core.errors import ContractError
+from evog.core.models import Answer, EvidenceRef, Feedback, Reflection
+from evog.core.providers import ModelReply, ToolCall
 
 
 def create_run(store, confidence, outcome=None, status="completed", question="A question"):
@@ -206,7 +206,7 @@ def test_failed_experience_has_priority_over_recent_uncertain_success(store, set
 def test_partial_diagnosis_failure_preserves_sufficient_valid_coverage(
     store, settings, monkeypatch
 ):
-    from evog.models import Diagnosis
+    from evog.core.models import Diagnosis
 
     run_ids = [create_run(store, 0.9, "rejected", question=f"question-{i}") for i in range(3)]
     for r in run_ids:
@@ -220,7 +220,7 @@ def test_partial_diagnosis_failure_preserves_sufficient_valid_coverage(
         ref = access.inspect(InspectArgs(run_id=r, event_index=0))["evidence_ref"]
         return Diagnosis.model_validate(diagnosis_payload(r, ref))
 
-    monkeypatch.setattr("evog.analysis.diagnose", diagnosed)
+    monkeypatch.setattr("evog.agents.analysis.diagnose", diagnosed)
     refs = [
         TraceAccess(store, [r]).inspect(InspectArgs(run_id=r, event_index=0))["evidence_ref"]
         for r in run_ids[1:]
@@ -267,7 +267,7 @@ def test_repeated_finding_cannot_count_two_ranges_of_one_run_as_two_cases(store,
 def test_synthesis_accepts_sibling_trial_evidence_but_counts_one_question(
     store, settings, monkeypatch
 ):
-    from evog.models import Diagnosis
+    from evog.core.models import Diagnosis
 
     first = create_run(store, 0.9, "rejected", question="same question")
     sibling = create_run(store, 0.9, "rejected", question="same question")
@@ -278,7 +278,7 @@ def test_synthesis_accepts_sibling_trial_evidence_but_counts_one_question(
         sibling_ref = access.inspect(InspectArgs(run_id=sibling, event_index=0))["evidence_ref"]
         return Diagnosis.model_validate(diagnosis_payload(run_id, sibling_ref))
 
-    monkeypatch.setattr("evog.analysis.diagnose", diagnosed)
+    monkeypatch.setattr("evog.agents.analysis.diagnose", diagnosed)
     finding = {
         "id": "sibling-evidence",
         "query_types": ["retrieval"],
@@ -324,7 +324,7 @@ def test_synthesis_accepts_sibling_trial_evidence_but_counts_one_question(
 
 
 def test_synthesis_rejects_evidence_from_context_omitted_diagnosis(store, settings, monkeypatch):
-    from evog.models import Diagnosis
+    from evog.core.models import Diagnosis
 
     run_ids = [create_run(store, 0.9, "rejected", question=f"question-{i}") for i in range(2)]
     for run_id in run_ids:
@@ -336,7 +336,7 @@ def test_synthesis_rejects_evidence_from_context_omitted_diagnosis(store, settin
         payload["condensed_rationale"] = "x" * 1200
         return Diagnosis.model_validate(payload)
 
-    monkeypatch.setattr("evog.analysis.diagnose", diagnosed)
+    monkeypatch.setattr("evog.agents.analysis.diagnose", diagnosed)
     settings.analysis_min_valid = 1
     settings.analysis_min_coverage = 0.5
     settings.synthesis_max_context_chars = 8000
@@ -506,7 +506,7 @@ def test_demo_analysis_inspects_evidence_and_preserves_findings(store, settings)
 
 
 def test_synthesis_repair_stays_within_context_budget(store, settings):
-    from evog.io import dumps
+    from evog.core.io import dumps
 
     answer = interact(store, DemoProvider(), settings, "Latest release?", ["demo-team"])
     store.feedback(Feedback(run_id=answer.run_id, outcome="rejected", source="test"))
@@ -654,7 +654,7 @@ class SynthesisProvider:
         self.context_sizes = []
 
     def complete(self, messages, tools):
-        from evog.io import dumps
+        from evog.core.io import dumps
 
         assert not tools
         supplied = json.loads(messages[1]["content"])
@@ -679,7 +679,7 @@ class SynthesisProvider:
 
 
 def install_diagnoses(monkeypatch, labels=None, large=False):
-    from evog.models import Diagnosis
+    from evog.core.models import Diagnosis
 
     def diagnosed(store, provider, settings, run_id, controls, access):
         ref = access.inspect(InspectArgs(run_id=run_id, event_index=0))["evidence_ref"]
@@ -691,7 +691,7 @@ def install_diagnoses(monkeypatch, labels=None, large=False):
             data["condensed_rationale"] = "Resolve the attribution bridge. " * 25
         return Diagnosis.model_validate(data)
 
-    monkeypatch.setattr("evog.analysis.diagnose", diagnosed)
+    monkeypatch.setattr("evog.agents.analysis.diagnose", diagnosed)
 
 
 @pytest.mark.parametrize("use_all_flag", [False, True])
@@ -786,7 +786,7 @@ def test_unjudged_uncertainty_keeps_its_label_and_missing_confidence_is_not_low(
 def test_accepted_sibling_evidence_cannot_supply_error_support_for_a_failed_question(
     store, settings, monkeypatch
 ):
-    from evog.models import Diagnosis
+    from evog.core.models import Diagnosis
 
     failed = create_run(store, 0.9, "rejected", question="Same")
     accepted = create_run(store, 0.2, "accepted", question="Same")
@@ -800,7 +800,7 @@ def test_accepted_sibling_evidence_cannot_supply_error_support_for_a_failed_ques
             {**diagnosis_payload(run_id, own), "evidence": [own, sibling]}
         )
 
-    monkeypatch.setattr("evog.analysis.diagnose", diagnosed)
+    monkeypatch.setattr("evog.agents.analysis.diagnose", diagnosed)
     provider = SynthesisProvider()
 
     def forged(messages, tools):
@@ -846,7 +846,7 @@ def test_context_bounded_bucket_batches_cover_every_complete_diagnosis(
 def test_cross_bucket_stage_cannot_reintroduce_evidence_not_in_bucket_findings(
     store, settings, monkeypatch
 ):
-    from evog.models import Diagnosis
+    from evog.core.models import Diagnosis
 
     run_id = create_run(store, 0.9, "rejected")
     store.event(run_id, "answer", {"text": "first"})
@@ -861,7 +861,7 @@ def test_cross_bucket_stage_cannot_reintroduce_evidence_not_in_bucket_findings(
     def diagnosed(store, provider, settings, target, controls, access):
         return Diagnosis.model_validate({**diagnosis_payload(target, refs[0]), "evidence": refs})
 
-    monkeypatch.setattr("evog.analysis.diagnose", diagnosed)
+    monkeypatch.setattr("evog.agents.analysis.diagnose", diagnosed)
     provider = SynthesisProvider()
 
     def draft(messages, tools):
@@ -878,7 +878,7 @@ def test_cross_bucket_stage_cannot_reintroduce_evidence_not_in_bucket_findings(
 
 
 def test_transport_failure_is_not_retried_by_diagnosis_or_synthesis(store, settings, monkeypatch):
-    from evog.errors import ProviderError
+    from evog.core.errors import ProviderError
 
     run_id = create_run(store, 0.9, "rejected")
     store.event(run_id, "answer", {"text": "answer"})
@@ -893,8 +893,8 @@ def test_transport_failure_is_not_retried_by_diagnosis_or_synthesis(store, setti
     assert not report.eligible_for_revision and "synthesis" in report.incomplete
 
 
-def test_legacy_analysis_reports_load_without_claiming_new_bucket_provenance():
-    from evog.models import AnalysisReport
+def test_historical_analysis_reports_load_without_claiming_new_bucket_provenance():
+    from evog.core.models import AnalysisReport
 
     old = {
         "id": "old",
@@ -912,7 +912,7 @@ def test_legacy_analysis_reports_load_without_claiming_new_bucket_provenance():
 
 
 def test_apd_summary_and_search_do_not_deliver_hidden_trace_evidence(store):
-    from evog.analysis import SearchTraceArgs
+    from evog.agents.analysis import SearchTraceArgs
 
     run_id = create_run(store, 0.1, "rejected")
     store.event(
@@ -929,7 +929,7 @@ def test_apd_summary_and_search_do_not_deliver_hidden_trace_evidence(store):
 
 
 def test_normalization_does_not_guess_semantic_synonyms():
-    from evog.analysis import normalize_query_type
+    from evog.agents.analysis import normalize_query_type
 
     assert normalize_query_type("  Temporal   Reasoning ") == "temporal reasoning"
     assert normalize_query_type("Chronology") != normalize_query_type("Temporal reasoning")
@@ -998,7 +998,7 @@ def test_cross_bucket_inputs_preserve_uc_and_unjudged_evidence_status(store, set
 def test_multiple_cross_batches_namespace_every_id_even_prefixed_model_ids(
     store, settings, monkeypatch
 ):
-    from evog import analysis
+    from evog.agents import analysis
 
     ids = [create_run(store, 0.9, "rejected", question=f"Question {index}") for index in range(3)]
     for run_id in ids:

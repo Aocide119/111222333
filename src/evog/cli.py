@@ -11,15 +11,15 @@ from typing import Any
 from pydantic import BaseModel, ValidationError
 
 from evog import __version__
+from evog.agents.demo import DEMO_MESSAGES, DemoProvider
 from evog.app import Application
-from evog.benchmark_data import load_corpus, load_episodes, resolve_root
-from evog.benchmark_split import create_manifest, validate_manifest, write_manifest
-from evog.benchmarks import run as run_benchmark
-from evog.config import Settings
-from evog.demo import DEMO_MESSAGES, DemoProvider
-from evog.errors import EvoGError
-from evog.io import atomic_write
-from evog.models import Message
+from evog.core.config import Settings
+from evog.core.errors import EvoGError
+from evog.core.io import atomic_write
+from evog.core.models import Message
+from evog.evaluation.data import load_corpus, load_episodes, resolve_root
+from evog.evaluation.runner import run as run_benchmark
+from evog.evaluation.split import create_manifest, validate_manifest, write_manifest
 
 
 def parser() -> argparse.ArgumentParser:
@@ -56,6 +56,10 @@ def parser() -> argparse.ArgumentParser:
     sub.add_parser("revisions", help="List harness checkpoints and validation levels")
     export = sub.add_parser("export-harness", help="Export active harness files for inspection")
     export.add_argument("directory", type=Path)
+    load = sub.add_parser(
+        "import-harness", help="Validate and activate a complete component bundle"
+    )
+    load.add_argument("directory", type=Path)
     sub.add_parser(
         "demo", help="Run an explicit offline fixture through the complete evolution loop"
     )
@@ -192,6 +196,8 @@ def main(argv: list[str] | None = None) -> int:
                 emit(app.store.revisions())
             elif command == "export-harness":
                 emit({"directory": str(app.export_harness(args.directory))})
+            elif command == "import-harness":
+                emit({"revision_id": app.import_harness(args.directory)})
             elif command == "trace":
                 result = app.trace(args.run_id)
                 if args.output:
@@ -243,9 +249,9 @@ def main(argv: list[str] | None = None) -> int:
                         ]
                     )
                 elif args.action in {"split", "campaign", "held-out", "rejudge"}:
-                    from evog.campaign import run_campaign
-                    from evog.frozen_evaluation import evaluate_frozen
-                    from evog.judge_recovery import rejudge_campaign
+                    from evog.evaluation.campaign import run_campaign
+                    from evog.evaluation.frozen import evaluate_frozen
+                    from evog.evaluation.recovery import rejudge_campaign
 
                     if args.episode_file or args.validation_episode_file or args.trials != 1:
                         raise ValueError(

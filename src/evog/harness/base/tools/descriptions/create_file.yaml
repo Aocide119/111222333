@@ -1,0 +1,29 @@
+name: create_file
+description: Create a new UTF-8 note under memory_store. Set overwrite only when intentionally
+  replacing an existing note.
+parameters:
+  additionalProperties: false
+  properties:
+    target:
+      const: memory_store
+      default: memory_store
+      title: Target
+      type: string
+    resource_path:
+      default: ''
+      title: Resource Path
+      type: string
+    content:
+      maxLength: 16000
+      title: Content
+      type: string
+    overwrite:
+      default: false
+      title: Overwrite
+      type: boolean
+  required:
+  - target
+  - resource_path
+  - content
+  title: CreateArgs
+  type: object

@@ -3,9 +3,9 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from evog.demo import DEMO_MESSAGES
-from evog.errors import ConflictError, ContractError
-from evog.models import Message
+from evog.agents.demo import DEMO_MESSAGES
+from evog.core.errors import ConflictError, ContractError
+from evog.core.models import Message
 
 
 def test_import_is_idempotent_and_preserves_timezone(store):
@@ -31,8 +31,8 @@ def test_source_offsets_and_fractional_seconds_do_not_disturb_chronological_orde
     assert messages[-1].model_dump(mode="json")["timestamp"] == "2026-01-07T00:10:00+08:00"
 
 
-def test_legacy_time_index_is_upgraded_without_rewriting_sources(store):
-    from evog.store import Store
+def test_timestamp_index_is_upgraded_without_rewriting_sources(store):
+    from evog.core.store import Store
 
     with store.connect() as db:
         original = [

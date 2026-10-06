@@ -3,11 +3,9 @@ import json
 import pytest
 from conftest import ScriptedProvider
 
-from evog.analysis import analyze
-from evog.app import Application
-from evog.demo import DemoProvider
-from evog.errors import ConflictError, ContractError
-from evog.evolution import (
+from evog.agents.analysis import analyze
+from evog.agents.demo import DemoProvider
+from evog.agents.evolution import (
     apply,
     auto_rollback,
     best_ever_for,
@@ -15,10 +13,12 @@ from evog.evolution import (
     propose,
     record_evaluation,
 )
-from evog.harness import Harness
-from evog.models import Feedback, PlanDraft
-from evog.providers import ModelReply, ToolCall
-from evog.runtime import interact
+from evog.agents.interaction import interact
+from evog.app import Application
+from evog.core.errors import ConflictError, ContractError
+from evog.core.models import Feedback
+from evog.core.providers import ModelReply, ToolCall
+from evog.harness.schema import Harness
 
 
 def prepare(store, settings):
@@ -35,7 +35,7 @@ def test_revision_activate_and_rollback_preserve_sources_and_trace(store, settin
     prior = store.harness().id
     activated = apply(store, plan.id)
     assert activated.validation == "structural"
-    assert "skills/status-verification.md" in store.harness().contents
+    assert "skills/status-verification/SKILL.md" in store.harness().contents
     with Application(store.workspace, provider=DemoProvider()) as group:
         group.rollback(prior)
     assert store.harness().id == prior
@@ -76,12 +76,12 @@ def test_stale_plan_cannot_replace_a_newer_revision(store, settings):
     "path,interface",
     [
         ("../config.toml", "Policy"),
-        ("prompts/group.md", "Operation"),
+        ("source/context.json", "Representation"),
         ("tools/evil.py", "Operation"),
         ("settings.json", "Intervention"),
     ],
 )
-def test_candidate_rejects_outside_surfaces_and_wrong_interfaces(store, settings, path, interface):
+def test_candidate_rejects_paths_outside_revision_surfaces(store, settings, path, interface):
     report, plan = prepare(store, settings)
     plan.changes[0].path = path
     plan.changes[0].interface = interface
@@ -100,22 +100,29 @@ def test_candidate_rejects_unknown_finding_or_task_identifier(store, settings):
         candidate(store, plan, report)
 
 
+def test_candidate_revalidates_interface_after_in_memory_mutation(store, settings):
+    report, plan = prepare(store, settings)
+    plan.changes[0].interface = "Unclassified"
+    with pytest.raises(ValueError, match="interface"):
+        candidate(store, plan, report)
+
+
 @pytest.mark.parametrize(
     "path,interface,content",
     [
-        ("representation.json", "Representation", '{"include_metadata":true}'),
+        ("memory/representation.json", "Representation", '{"include_metadata":true}'),
         (
-            "operations.json",
-            "Operation",
+            "tools/operations.json",
+            "Policy",
             '{"search_mode":"all","search_limit":3,"context_window":1}',
         ),
         (
-            "interventions.json",
+            "middleware/interventions.json",
             "Intervention",
             '{"max_citations":4,"max_answer_chars":1000,"require_citations_for_partial":true}',
         ),
         (
-            "prompts/group.md",
+            "prompt/group.md",
             "Policy",
             "Use source records to verify current status and retain uncertainty.",
         ),
@@ -137,7 +144,7 @@ def test_all_four_interfaces_compile_into_real_runtime_settings(
 
 def test_operations_cannot_exceed_fixed_runtime_ceiling(store, settings):
     report, plan = prepare(store, settings)
-    plan.changes[0].path = "operations.json"
+    plan.changes[0].path = "tools/operations.json"
     plan.changes[0].interface = "Operation"
     plan.changes[0].content = '{"search_limit":10000}'
     with pytest.raises(ValueError):
@@ -146,7 +153,7 @@ def test_operations_cannot_exceed_fixed_runtime_ceiling(store, settings):
 
 def test_operation_revision_can_register_a_query_tool(store, settings):
     report, plan = prepare(store, settings)
-    plan.changes[0].path = "operations.json"
+    plan.changes[0].path = "tools/operations.json"
     plan.changes[0].interface = "Operation"
     plan.changes[0].content = json.dumps(
         {
@@ -161,38 +168,6 @@ def test_operation_revision_can_register_a_query_tool(store, settings):
     )
     revised = candidate(store, plan, report)
     assert revised.operations.query_tools[0].name == "query_sender"
-
-
-def test_evolution_can_inspect_analysis_validate_and_repair_an_invalid_draft(store, settings):
-    report, original = prepare(store, settings)
-    draft = PlanDraft(summary=original.summary, changes=original.changes).model_dump()
-    bad = json.loads(json.dumps(draft))
-    bad["changes"][0]["path"] = "tools/arbitrary.py"
-
-    def checked(messages, tools):
-        assert json.loads(messages[-1]["content"])["valid"]
-        return ModelReply(content=json.dumps(draft))
-
-    provider = ScriptedProvider(
-        ModelReply(
-            tool_calls=[
-                ToolCall(
-                    id="a",
-                    name="read_analysis",
-                    arguments={"kind": "diagnosis", "id": report.selected_run_ids[0]},
-                )
-            ]
-        ),
-        ModelReply(content=json.dumps(bad)),
-        ModelReply(
-            tool_calls=[ToolCall(id="v", name="validate_revision", arguments={"draft": draft})]
-        ),
-        checked,
-    )
-    prior = store.harness().id
-    plan = propose(store, provider, settings, report)
-    assert plan.changes and store.harness().id == prior
-    assert any(r["status"] == "invalid" for r in store.artifacts("proposal_attempt"))
 
 
 def test_change_associations_cannot_use_source_refs_instead_of_analysis_runs(store, settings):
@@ -352,41 +327,6 @@ def test_auto_rollback_rejects_a_staged_unactivated_candidate(store, settings):
     )
     assert auto_rollback(store, "staged-test") is None
     assert store.harness().id == plan.parent_revision_id
-
-
-def test_partial_analysis_can_register_independently_inspected_finding(store, settings):
-    report, original = prepare(store, settings)
-    report = report.model_copy(update={"findings": [], "eligible_for_revision": False})
-    original_finding = store.artifact(original.analysis_id, "analysis")["findings"][0]
-    evidence = original_finding["evidence"][0]
-    finding = {**original_finding, "id": "recovered", "support_kind": "isolated"}
-    draft = PlanDraft(summary=original.summary, changes=original.changes).model_dump()
-    draft["changes"][0]["finding_ids"] = ["recovered"]
-    provider = ScriptedProvider(
-        ModelReply(
-            tool_calls=[
-                ToolCall(
-                    id="i",
-                    name="inspect_trace",
-                    arguments={
-                        "run_id": evidence["run_id"],
-                        "event_index": evidence["event_index"],
-                        "field_path": evidence["field_path"],
-                        "start_char": evidence["start_char"],
-                        "limit": evidence["end_char"] - evidence["start_char"],
-                    },
-                )
-            ]
-        ),
-        ModelReply(
-            tool_calls=[ToolCall(id="r", name="register_finding", arguments={"finding": finding})]
-        ),
-        ModelReply(content=json.dumps(draft)),
-    )
-    recovered = propose(store, provider, settings, report)
-    assert recovered.changes[0].finding_ids == ["recovered"]
-    assert candidate(store, recovered, report).id != report.revision_id
-    assert store.artifacts("evolution_finding")[0]["independently_inspected"]
 
 
 def test_unknown_results_are_unverified_and_never_best_ever(store, settings):
@@ -592,7 +532,7 @@ def test_auto_rollback_uses_best_activated_observation_when_best_candidate_is_st
         },
     )
     contents = dict(store.harness().contents)
-    contents["prompts/group.md"] += "\nConfirm ordering before summarizing."
+    contents["prompt/group.md"] += "\nConfirm ordering before summarizing."
     staged = Harness(contents)
     with store.connect() as db:
         db.execute(

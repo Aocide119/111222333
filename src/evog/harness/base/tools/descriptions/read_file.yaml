@@ -1,0 +1,36 @@
+name: read_file
+description: Read a one-based line range from one allowed text file. Use the same
+  target and resource_path returned by list_files or grep_search.
+parameters:
+  additionalProperties: false
+  properties:
+    target:
+      default: memory_units
+      enum:
+      - workspace
+      - memory_units
+      - memory_store
+      - skills
+      title: Target
+      type: string
+    resource_path:
+      default: ''
+      title: Resource Path
+      type: string
+    start_line:
+      default: 1
+      minimum: 1
+      title: Start Line
+      type: integer
+    end_line:
+      anyOf:
+      - minimum: 1
+        type: integer
+      - type: 'null'
+      default: null
+      title: End Line
+  title: ReadArgs
+  type: object
+  required:
+  - target
+  - resource_path

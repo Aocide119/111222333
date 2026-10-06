@@ -1,0 +1,1 @@
+{"context_window":0,"excerpt_chars":1400,"match_mode":"literal","query_tools":[],"read_limit":20,"search_fields":["text","sender","timestamp","group_id","message_id","ref","reply_to","metadata"],"search_limit":8,"search_mode":"any"}

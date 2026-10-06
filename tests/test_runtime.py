@@ -3,13 +3,13 @@ import json
 import pytest
 from conftest import ScriptedProvider
 
+from evog.agents.demo import DemoProvider
+from evog.agents.interaction import interact, trim_messages, validate_answer
 from evog.app import Application
-from evog.demo import DemoProvider
-from evog.errors import ContractError, ProviderError, RunFailed
-from evog.harness import Harness
-from evog.models import AnswerDraft
-from evog.providers import ModelReply, ToolCall
-from evog.runtime import interact, trim_messages, validate_answer
+from evog.core.errors import ContractError, ProviderError, RunFailed
+from evog.core.models import AnswerDraft
+from evog.core.providers import ModelReply, ToolCall
+from evog.harness.schema import Harness
 
 
 def test_complete_offline_interaction_reflects_before_feedback(store, settings):
@@ -28,7 +28,11 @@ def test_forged_citation_is_repaired_by_real_delivery(store, settings):
         )
     )
     search = ModelReply(
-        tool_calls=[ToolCall(id="s", name="grep_search", arguments={"terms": ["changed"]})]
+        tool_calls=[
+            ToolCall(
+                id="s", name="grep_search", arguments={"target": "memory_units", "query": "changed"}
+            )
+        ]
     )
     supported = ModelReply(
         content=json.dumps(
@@ -54,7 +58,7 @@ def test_invalid_final_answers_are_selected_contract_failures(store, settings):
         interact(store, provider, settings, "Question", ["demo-team"])
     assert store.run(failure.value.run_id)["status"] == "contract_failed"
     assert provider.calls[-1][1] == []
-    from evog.analysis import select_experience
+    from evog.agents.analysis import select_experience
 
     selection = select_experience(store, settings, store.harness().id)
     assert selection["selected"] == [failure.value.run_id]
@@ -71,14 +75,16 @@ def test_provider_failure_preserves_run_and_safe_error(store, settings):
 
 
 def test_tool_filesystem_failure_has_separate_status(store, settings, monkeypatch):
-    from evog.tools import Tools
+    from evog.harness.tools import Tools
 
     def fail(*_):
         raise PermissionError("private filesystem details")
 
     monkeypatch.setattr(Tools, "execute", fail)
     provider = ScriptedProvider(
-        ModelReply(tool_calls=[ToolCall(id="s", name="list_files", arguments={})])
+        ModelReply(
+            tool_calls=[ToolCall(id="s", name="list_files", arguments={"target": "workspace"})]
+        )
     )
     with pytest.raises(RunFailed) as failure:
         interact(store, provider, settings, "Question", ["demo-team"])
@@ -87,7 +93,9 @@ def test_tool_filesystem_failure_has_separate_status(store, settings, monkeypatc
 
 
 def test_tool_only_model_at_turn_boundary_is_budget_exhaustion(store, settings):
-    reply = ModelReply(tool_calls=[ToolCall(id="s", name="list_files", arguments={})])
+    reply = ModelReply(
+        tool_calls=[ToolCall(id="s", name="list_files", arguments={"target": "workspace"})]
+    )
     provider = ScriptedProvider(*[reply for _ in range(settings.max_turns)])
     with pytest.raises(RunFailed) as failure:
         interact(store, provider, settings, "Question", ["demo-team"])
@@ -113,7 +121,7 @@ def test_reflection_failure_preserves_supported_answer(store, settings, empty_re
 
 def test_fixed_complete_citation_guard_survives_policy_changes(store):
     contents = store.harness().contents
-    contents["prompts/group.md"] = "Answer without evidence."
+    contents["prompt/group.md"] = "Answer without evidence."
     draft = AnswerDraft(text="unsupported", confidence=0.9, status="complete", citations=[])
     with pytest.raises(ContractError, match="source citations"):
         validate_answer(draft, Harness(contents), set())
@@ -121,7 +129,7 @@ def test_fixed_complete_citation_guard_survives_policy_changes(store):
 
 def test_intervention_answer_limit_is_effective(store):
     contents = store.harness().contents
-    contents["interventions.json"] = (
+    contents["middleware/interventions.json"] = (
         '{"max_answer_chars":256,"max_citations":1,"require_citations_for_partial":true}'
     )
     draft = AnswerDraft(
@@ -135,8 +143,18 @@ def test_tool_call_budget_is_enforced(store, settings, empty_reply):
     settings.max_tool_calls = 1
     batch = ModelReply(
         tool_calls=[
-            ToolCall(id="1", name="grep_search", arguments={"terms": ["release"]}),
-            ToolCall(id="2", name="write_file", arguments={"path": "memory/x.md", "content": "no"}),
+            ToolCall(
+                id="1", name="grep_search", arguments={"target": "memory_units", "query": "release"}
+            ),
+            ToolCall(
+                id="2",
+                name="write_file",
+                arguments={
+                    "target": "memory_store",
+                    "resource_path": "working_memory/x.md",
+                    "content": "no",
+                },
+            ),
         ]
     )
     reflection = ModelReply(
@@ -154,7 +172,10 @@ def test_runtime_enforces_tool_cap_when_model_validation_is_bypassed(store, sett
     settings.max_turns = 1
     provider = ScriptedProvider(
         ModelReply(
-            tool_calls=[ToolCall(id=str(i), name="list_files", arguments={}) for i in range(3)]
+            tool_calls=[
+                ToolCall(id=str(i), name="list_files", arguments={"target": "workspace"})
+                for i in range(3)
+            ]
         ),
         ModelReply(
             content='{"text":"No evidence","confidence":0.5,"status":"insufficient","citations":[]}'
@@ -196,11 +217,17 @@ def test_context_trim_preserves_task_and_complete_tool_exchanges():
 
 
 def test_context_trimming_continues_answering_and_keeps_original_trace(store, settings):
-    settings.max_context_chars = 10000
+    settings.max_context_chars = 20000
     provider = ScriptedProvider(
         ModelReply(content="x" * 10000),
         ModelReply(
-            tool_calls=[ToolCall(id="s", name="grep_search", arguments={"terms": ["changed"]})]
+            tool_calls=[
+                ToolCall(
+                    id="s",
+                    name="grep_search",
+                    arguments={"target": "memory_units", "query": "changed"},
+                )
+            ]
         ),
         ModelReply(
             content='{"text":"January 15","confidence":0.9,"status":"complete","citations":["demo-team/002"]}'
@@ -229,7 +256,11 @@ def test_reserved_final_answer_at_each_budget_boundary(store, settings, boundary
                 ToolCall(
                     id=f"s{i}",
                     name="grep_search",
-                    arguments={"terms": ["changed"], "offset": 0 if boundary == "loop" else i},
+                    arguments={
+                        "target": "memory_units",
+                        "query": "changed",
+                        "offset": 0 if boundary == "loop" else i,
+                    },
                 )
             ]
         )
@@ -255,7 +286,10 @@ def test_reserved_final_answer_at_each_budget_boundary(store, settings, boundary
 def test_tool_round_limit_counts_batches_and_parallel_cap_denies_extra_calls(store, settings):
     settings.max_tool_rounds = 1
     batch = ModelReply(
-        tool_calls=[ToolCall(id=str(i), name="list_files", arguments={}) for i in range(4)]
+        tool_calls=[
+            ToolCall(id=str(i), name="list_files", arguments={"target": "workspace"})
+            for i in range(4)
+        ]
     )
     provider = ScriptedProvider(
         batch,
@@ -281,7 +315,7 @@ def test_expired_question_does_not_accept_late_answer_or_make_another_call(
     store, settings, monkeypatch
 ):
     now = [100.0]
-    monkeypatch.setattr("evog.runtime.time.monotonic", lambda: now[0])
+    monkeypatch.setattr("evog.agents.interaction.time.monotonic", lambda: now[0])
     settings.question_timeout_seconds = 1
 
     def late(messages, tools):
@@ -302,7 +336,13 @@ def test_reserved_final_answer_still_rejects_unread_or_foreign_citations(store, 
     settings.max_tool_calls = 1
     provider = ScriptedProvider(
         ModelReply(
-            tool_calls=[ToolCall(id="s", name="grep_search", arguments={"terms": ["changed"]})]
+            tool_calls=[
+                ToolCall(
+                    id="s",
+                    name="grep_search",
+                    arguments={"target": "memory_units", "query": "changed"},
+                )
+            ]
         ),
         ModelReply(
             content=json.dumps(
@@ -316,9 +356,9 @@ def test_reserved_final_answer_still_rejects_unread_or_foreign_citations(store, 
 
 
 def test_archived_tool_preview_withholds_citations_and_trace_keeps_full_result(store, settings):
-    from evog.demo import DEMO_MESSAGES
-    from evog.io import dumps, fingerprint
-    from evog.models import Message
+    from evog.agents.demo import DEMO_MESSAGES
+    from evog.core.io import dumps, fingerprint
+    from evog.core.models import Message
 
     store.ingest(
         iter(
@@ -329,8 +369,8 @@ def test_archived_tool_preview_withholds_citations_and_trace_keeps_full_result(s
         )
     )
     contents = store.harness().contents
-    contents["operations.json"] = '{"search_mode":"any","search_limit":30,"context_window":5}'
-    path = "context/" + fingerprint("demo-team") + ".jsonl"
+    contents["tools/operations.json"] = '{"search_mode":"any","search_limit":30,"context_window":5}'
+    path = "memory_units/" + fingerprint("demo-team") + ".jsonl"
     # Source order is timestamp/message ID; locate the source without delivering it to the model.
     ordered = list(store.messages("demo-team"))
     line = next(i + 1 for i, message in enumerate(ordered) if message.ref == "demo-team/large-00")
@@ -339,7 +379,13 @@ def test_archived_tool_preview_withholds_citations_and_trace_keeps_full_result(s
     )
     provider = ScriptedProvider(
         ModelReply(
-            tool_calls=[ToolCall(id="s", name="grep_search", arguments={"terms": ["release"]})]
+            tool_calls=[
+                ToolCall(
+                    id="s",
+                    name="grep_search",
+                    arguments={"target": "memory_units", "query": "release"},
+                )
+            ]
         ),
         final,
         ModelReply(
@@ -347,7 +393,12 @@ def test_archived_tool_preview_withholds_citations_and_trace_keeps_full_result(s
                 ToolCall(
                     id="r",
                     name="read_file",
-                    arguments={"path": path, "start_line": line, "limit": 1},
+                    arguments={
+                        "target": "memory_units",
+                        "resource_path": path.removeprefix("memory_units/"),
+                        "start_line": line,
+                        "end_line": line,
+                    },
                 )
             ]
         ),

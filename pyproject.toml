@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Evidence-grounded group memory with experience-driven harness evolution"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["httpx>=0.27,<1", "pydantic>=2.10,<3"]
+dependencies = ["httpx>=0.27,<1", "pydantic>=2.10,<3", "PyYAML>=6.0.2,<7", "jsonschema>=4.23,<5"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.11"]

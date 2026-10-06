@@ -2,15 +2,15 @@ import json
 
 import pytest
 
+from evog.agents.demo import DEMO_MESSAGES, DemoProvider
 from evog.app import Application
-from evog.benchmark_data import Corpus, Episode
-from evog.benchmark_split import create_manifest
-from evog.campaign import run_campaign
-from evog.demo import DEMO_MESSAGES, DemoProvider
-from evog.errors import ContractError
-from evog.frozen_evaluation import evaluate_frozen
-from evog.models import Message
-from evog.providers import ModelReply
+from evog.core.errors import ContractError
+from evog.core.models import Message
+from evog.core.providers import ModelReply
+from evog.evaluation.campaign import run_campaign
+from evog.evaluation.data import Corpus, Episode
+from evog.evaluation.frozen import evaluate_frozen
+from evog.evaluation.split import create_manifest
 
 
 class Offline(DemoProvider):

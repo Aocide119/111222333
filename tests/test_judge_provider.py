@@ -7,13 +7,13 @@ from threading import Event, Lock
 import httpx
 import pytest
 
+from evog.agents.demo import DemoProvider
 from evog.app import Application
-from evog.benchmark_data import Episode
-from evog.benchmark_judge import score
-from evog.config import Settings
-from evog.demo import DemoProvider
-from evog.errors import DeadlineExceeded, ProviderError
-from evog.providers import ChatProvider, ConcurrentProvider, ModelReply
+from evog.core.config import Settings
+from evog.core.errors import DeadlineExceeded, ProviderError
+from evog.core.providers import ChatProvider, ConcurrentProvider, ModelReply
+from evog.evaluation.data import Episode
+from evog.evaluation.judge import score
 
 
 def episode():
@@ -110,8 +110,8 @@ def test_judge_provider_failure_is_terminal_without_stage_retry():
 
 def test_judge_parser_repairs_share_one_deadline(monkeypatch):
     now = [0.0]
-    monkeypatch.setattr("evog.providers.time.monotonic", lambda: now[0])
-    monkeypatch.setattr("evog.benchmark_judge.time.monotonic", lambda: now[0])
+    monkeypatch.setattr("evog.core.providers.time.monotonic", lambda: now[0])
+    monkeypatch.setattr("evog.evaluation.judge.time.monotonic", lambda: now[0])
 
     class Malformed:
         calls = 0
@@ -158,7 +158,7 @@ def test_judge_concurrency_limits_independently_issued_requests():
 
 
 def test_expired_judge_deadline_does_not_acquire_request_slot(monkeypatch):
-    monkeypatch.setattr("evog.providers.time.monotonic", lambda: 10)
+    monkeypatch.setattr("evog.core.providers.time.monotonic", lambda: 10)
     provider = ConcurrentProvider(DemoProvider(), 1)
     with pytest.raises(DeadlineExceeded, match="Judge deadline"):
         provider.complete_before([], [], deadline=9)

@@ -1,6 +1,6 @@
 import pytest
 
-from evog.answer_contract import answer_draft, parse_final_message, validate_final_message
+from evog.agents.answer_contract import answer_draft, parse_final_message, validate_final_message
 
 
 def test_text_protocol_supports_multiline_answers_and_bias():

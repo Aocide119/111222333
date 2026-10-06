@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from evog.config import Settings
-from evog.demo import DEMO_MESSAGES
-from evog.models import Message
-from evog.providers import ModelReply
-from evog.store import Store
+from evog.agents.demo import DEMO_MESSAGES
+from evog.core.config import Settings
+from evog.core.models import Message
+from evog.core.providers import ModelReply
+from evog.core.store import Store
 
 
 class ScriptedProvider:

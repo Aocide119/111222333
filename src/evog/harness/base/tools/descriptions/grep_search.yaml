@@ -1,0 +1,55 @@
+name: grep_search
+description: Search using literal strings. Each required_pattern_groups group matches
+  any alias; all groups must match. Selected patterns follow the harness any/all rule.
+  Optional patterns only rank already matching records.
+parameters:
+  additionalProperties: false
+  properties:
+    target:
+      default: memory_units
+      enum:
+      - memory_units
+      - memory_store
+      title: Target
+      type: string
+    resource_path:
+      default: ''
+      title: Resource Path
+      type: string
+    query:
+      default: ''
+      title: Query
+      type: string
+    patterns:
+      items:
+        type: string
+      maxItems: 8
+      title: Patterns
+      type: array
+    selected_patterns:
+      items:
+        type: string
+      maxItems: 2
+      title: Selected Patterns
+      type: array
+    required_pattern_groups:
+      items:
+        items:
+          type: string
+        maxItems: 8
+        minItems: 1
+        type: array
+      maxItems: 8
+      title: Required Pattern Groups
+      type: array
+    optional_patterns:
+      items:
+        type: string
+      maxItems: 8
+      title: Optional Patterns
+      type: array
+  title: SearchArgs
+  type: object
+  required:
+  - target
+  - query

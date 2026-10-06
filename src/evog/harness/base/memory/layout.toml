@@ -1,0 +1,11 @@
+version = 1
+
+[categories]
+group_profile = "long_term_memory/group_profile.md"
+people = "long_term_memory/people"
+events = "long_term_memory/events"
+
+[round]
+visibility = "frozen"
+merge = "source_union"
+working_scope = "question"

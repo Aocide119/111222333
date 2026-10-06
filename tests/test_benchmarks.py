@@ -3,14 +3,14 @@ import json
 import pytest
 from conftest import ScriptedProvider
 
+from evog.agents.demo import DemoProvider
 from evog.app import Application
-from evog.benchmark_data import Episode, load_corpus, load_episodes
-from evog.benchmark_judge import parse_evermem, parse_groupmem, score
-from evog.benchmarks import compare, metrics, run
-from evog.config import Settings
-from evog.demo import DemoProvider
-from evog.errors import ContractError, ProviderError
-from evog.providers import ModelReply
+from evog.core.config import Settings
+from evog.core.errors import ContractError, ProviderError
+from evog.core.providers import ModelReply
+from evog.evaluation.data import Episode, load_corpus, load_episodes
+from evog.evaluation.judge import parse_evermem, parse_groupmem, score
+from evog.evaluation.runner import compare, metrics, run
 
 
 def test_evermem_adapter_preserves_gold_outside_messages(tmp_path):
@@ -356,12 +356,12 @@ def test_unchanged_scores_do_not_activate_a_candidate(ever_root, tmp_path):
 
 
 def test_source_view_preserves_evolved_representation(ever_root, tmp_path):
-    from evog.harness import Harness
+    from evog.harness.schema import Harness
 
     with Application(tmp_path / "workspace", provider=DemoProvider()) as app:
         initial = app.store.harness()
         contents = dict(initial.contents)
-        contents["representation.json"] = json.dumps(
+        contents["memory/representation.json"] = json.dumps(
             {"timestamp_view": "both", "include_reply_refs": True, "include_metadata": False}
         )
         evolved = Harness(contents)
@@ -405,7 +405,7 @@ def test_evaluation_fingerprint_uses_actual_validation_questions(ever_root, tmp_
 
 
 def test_candidate_policies_require_gain_and_keep_infrastructure_unknown():
-    from evog.benchmarks import acceptance
+    from evog.evaluation.runner import acceptance
 
     net = {"fail_to_pass": 2, "pass_to_fail": 1, "unscored": 0}
     assert acceptance(Settings(), net)[0]
@@ -516,7 +516,7 @@ def test_resume_recovers_committed_activation_without_repeating_trials(ever_root
 def test_resume_preserves_unscored_failures_before_a_run_was_created(
     ever_root, tmp_path, monkeypatch
 ):
-    from evog import benchmarks
+    from evog.evaluation import runner as benchmarks
 
     attempted = []
 
@@ -552,7 +552,7 @@ def test_resume_preserves_unscored_failures_before_a_run_was_created(
     ],
 )
 def test_resume_rejects_malformed_trials_without_runs(ever_root, tmp_path, updates):
-    from evog.benchmarks import evaluate
+    from evog.evaluation.runner import evaluate
 
     with Application(tmp_path / "workspace", provider=DemoProvider()) as app:
         episodes = load_episodes("evermembench", ever_root, limit=1)
@@ -583,7 +583,7 @@ def test_resume_rejects_malformed_trials_without_runs(ever_root, tmp_path, updat
 def test_resume_rejects_manual_rollback_behind_last_activated_iteration(
     ever_root, tmp_path, monkeypatch
 ):
-    from evog import benchmarks
+    from evog.evaluation import runner as benchmarks
 
     class Improving(DemoProvider):
         judgments = 0
@@ -628,9 +628,10 @@ def test_resume_rejects_manual_rollback_behind_last_activated_iteration(
 def test_runner_resumes_after_regression_recovery_to_historical_best(
     ever_root, tmp_path, monkeypatch
 ):
-    from evog import benchmarks, evolution
-    from evog.harness import Harness
-    from evog.io import dumps
+    from evog.agents import evolution
+    from evog.core.io import dumps
+    from evog.evaluation import runner as benchmarks
+    from evog.harness.schema import Harness
 
     qa_path = ever_root / "dataset" / "01" / "qa_01.json"
     qa = json.loads(qa_path.read_text())
@@ -654,13 +655,13 @@ def test_runner_resumes_after_regression_recovery_to_historical_best(
     with Application(tmp_path / "workspace", provider=Regressing()) as app:
         base = app.store.harness()
         contents = dict(base.contents)
-        contents["representation.json"] = dumps(
+        contents["memory/representation.json"] = dumps(
             base.representation.model_copy(update={"include_metadata": True}).model_dump()
         )
         parent = Harness(contents)
         app.store.activate(parent, base.id, "fixture-parent", "business")
         historical_contents = dict(contents)
-        historical_contents["prompts/group.md"] += "\nConfirm the current status before replying."
+        historical_contents["prompt/group.md"] += "\nConfirm the current status before replying."
         historical = Harness(historical_contents)
         app.store.activate(historical, parent.id, "fixture-best", "business")
         app.store.activate(parent, historical.id, "fixture-current", "business")

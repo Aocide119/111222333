@@ -1,0 +1,29 @@
+name: list_files
+description: List files under one allowed logical root. Use target and resource_path;
+  never pass an absolute path.
+parameters:
+  additionalProperties: false
+  properties:
+    target:
+      default: workspace
+      enum:
+      - workspace
+      - memory_units
+      - memory_store
+      - skills
+      title: Target
+      type: string
+    resource_path:
+      default: ''
+      title: Resource Path
+      type: string
+    max_depth:
+      default: 3
+      maximum: 10
+      minimum: 1
+      title: Max Depth
+      type: integer
+  title: ListArgs
+  type: object
+  required:
+  - target

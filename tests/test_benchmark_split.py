@@ -5,10 +5,10 @@ import random
 
 import pytest
 
-from evog.benchmark_data import Episode, read_episode_ids
-from evog.benchmark_split import create_manifest, validate_manifest, write_manifest
-from evog.errors import ContractError
-from evog.io import dumps
+from evog.core.errors import ContractError
+from evog.core.io import dumps
+from evog.evaluation.data import Episode, read_episode_ids
+from evog.evaluation.split import create_manifest, validate_manifest, write_manifest
 
 
 def cohort(counts=(213, 249, 300, 402, 427, 268, 176, 169, 196)):

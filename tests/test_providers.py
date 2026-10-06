@@ -3,9 +3,9 @@ import json
 import httpx
 import pytest
 
-from evog.config import Settings
-from evog.errors import DeadlineExceeded, ProviderError
-from evog.providers import ChatProvider, stage_provider
+from evog.core.config import Settings
+from evog.core.errors import DeadlineExceeded, ProviderError
+from evog.core.providers import ChatProvider, stage_provider
 
 
 def settings():
@@ -88,7 +88,7 @@ def test_invalid_provider_response_has_a_safe_error(response):
 
 
 def test_retry_is_bounded_and_http_success_is_parsed(monkeypatch):
-    monkeypatch.setattr("evog.providers.time.sleep", lambda _: None)
+    monkeypatch.setattr("evog.core.providers.time.sleep", lambda _: None)
     attempts = []
 
     def respond(_):
@@ -144,7 +144,7 @@ def test_all_stage_transports_keep_model_and_reasoning_flags_with_separate_outpu
 
 def test_deadline_bounds_http_timeout_and_prevents_retries_after_expiry(monkeypatch):
     now = [10.0]
-    monkeypatch.setattr("evog.providers.time.monotonic", lambda: now[0])
+    monkeypatch.setattr("evog.core.providers.time.monotonic", lambda: now[0])
     calls = []
 
     def respond(request):
@@ -160,7 +160,7 @@ def test_deadline_bounds_http_timeout_and_prevents_retries_after_expiry(monkeypa
 
 
 def test_stalled_requests_retry_within_a_bounded_attempt_count(monkeypatch):
-    monkeypatch.setattr("evog.providers.time.sleep", lambda _: None)
+    monkeypatch.setattr("evog.core.providers.time.sleep", lambda _: None)
     calls = []
 
     def respond(request):
@@ -221,7 +221,7 @@ def test_analysis_transport_retries_three_total_attempts_with_ten_second_backoff
     monkeypatch, failure
 ):
     attempts, delays = [], []
-    monkeypatch.setattr("evog.providers.time.sleep", delays.append)
+    monkeypatch.setattr("evog.core.providers.time.sleep", delays.append)
 
     def respond(request):
         attempts.append(1)
@@ -238,8 +238,8 @@ def test_analysis_transport_retries_three_total_attempts_with_ten_second_backoff
 
 def test_backoff_that_exceeds_deadline_does_not_sleep_or_issue_another_request(monkeypatch):
     attempts, delays = [], []
-    monkeypatch.setattr("evog.providers.time.monotonic", lambda: 10)
-    monkeypatch.setattr("evog.providers.time.sleep", delays.append)
+    monkeypatch.setattr("evog.core.providers.time.monotonic", lambda: 10)
+    monkeypatch.setattr("evog.core.providers.time.sleep", delays.append)
 
     def respond(request):
         attempts.append(1)

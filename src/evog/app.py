@@ -8,15 +8,21 @@ from threading import Lock
 from typing import Literal
 from uuid import uuid4
 
-from evog import analysis, evolution
-from evog.config import Settings
-from evog.errors import ProviderError
-from evog.evolution import Validator
-from evog.io import atomic_write, safe_path
-from evog.models import AnalysisReport, Answer, AppliedRevision, EvolutionPlan, Feedback, Message
-from evog.providers import ChatProvider, ConcurrentProvider, Provider
-from evog.runtime import interact
-from evog.store import Store
+from evog.agents import analysis, evolution
+from evog.agents.evolution import Validator
+from evog.agents.interaction import interact
+from evog.core.config import Settings
+from evog.core.errors import ProviderError
+from evog.core.models import (
+    AnalysisReport,
+    Answer,
+    AppliedRevision,
+    EvolutionPlan,
+    Feedback,
+    Message,
+)
+from evog.core.providers import ChatProvider, ConcurrentProvider, Provider
+from evog.core.store import Store
 
 
 class Application:
@@ -49,7 +55,7 @@ class Application:
         """Create the explicitly configured judge only when semantic scoring needs it."""
         with self._judge_lock:
             if self._judge is None:
-                from evog.demo import DemoProvider
+                from evog.agents.demo import DemoProvider
 
                 if isinstance(self._model, DemoProvider):
                     self._judge = self._model
@@ -131,11 +137,20 @@ class Application:
         }
 
     def export_harness(self, destination: str | Path) -> Path:
-        root = Path(destination).expanduser().resolve()
-        root.mkdir(parents=True, exist_ok=True)
-        for name, text in self.store.harness().contents.items():
-            atomic_write(safe_path(root, name), text)
-        return root
+        from evog.harness.bundle import materialize_bundle
+
+        return materialize_bundle(self.store.harness(), Path(destination).expanduser())
+
+    def import_harness(self, source: str | Path) -> str:
+        from evog.harness.bundle import load_bundle
+        from evog.harness.validation import validate_components
+
+        harness = load_bundle(Path(source).expanduser())
+        validate_components(harness)
+        previous = self.store.harness().id
+        if harness.id != previous:
+            self.store.activate(harness, previous, "component-import", "structural")
+        return harness.id
 
     def close(self) -> None:
         with self._provider_lock:
