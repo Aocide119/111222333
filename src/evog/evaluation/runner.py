@@ -19,6 +19,7 @@ from evog.core.errors import ContractError, EvoGError, ProviderError, RunFailed
 from evog.core.identity import runtime_source_fingerprint
 from evog.core.io import atomic_write, dumps, fingerprint
 from evog.core.models import AnalysisReport, AppliedRevision, EvolutionPlan
+from evog.core.usage import aggregate_usage
 from evog.evaluation.data import BenchmarkName, Corpus, Episode, load_corpus, load_episodes
 from evog.evaluation.judge import score
 from evog.evaluation.metrics import research_metrics, token_total
@@ -105,11 +106,14 @@ def metrics(results: list[dict]) -> dict:
         questions.setdefault(row["episode_id"], []).append(row["passed"])
     question_passed = sum(all(v is True for v in trials) for trials in questions.values())
     question_unscored = sum(any(v is None for v in trials) for trials in questions.values())
-    usage: dict[str, int] = {}
-    for row in results:
-        for stage in ("agent_usage", "judge_usage"):
-            for key, value in row.get(stage, {}).items():
-                usage[key] = usage.get(key, 0) + value
+    usage = aggregate_usage(
+        [
+            row.get(stage, {})
+            for row in results
+            for stage in ("agent_usage", "judge_usage")
+            if not (stage == "judge_usage" and row.get("judge_tokens") == 0)
+        ]
+    )
     return {
         "total": total,
         "metric_unit": "trial",
@@ -270,17 +274,6 @@ def _evaluate_one(
     except EvoGError as exc:
         row.update({"status": "failed", "error": str(exc)})
     events = app.store.events(row["run_id"]) if row.get("run_id") else []
-    usage: dict[str, int] = {}
-    answer_usage: dict[str, int] = {}
-    reflection_usage: dict[str, int] = {}
-    for event in events:
-        if event.kind in ("model", "reflection") or (
-            event.kind == "error" and event.data.get("code") == "reflection_unavailable"
-        ):
-            for key, value in event.data.get("usage", {}).items():
-                usage[key] = usage.get(key, 0) + value
-                stage_usage = answer_usage if event.kind == "model" else reflection_usage
-                stage_usage[key] = stage_usage.get(key, 0) + value
     model_costs = [event.data.get("usage", {}) for event in events if event.kind == "model"]
     reflection_events = [
         event
@@ -288,6 +281,10 @@ def _evaluate_one(
         if event.kind == "reflection"
         or (event.kind == "error" and event.data.get("code") == "reflection_unavailable")
     ]
+    reflection_costs = [event.data.get("usage", {}) for event in reflection_events]
+    answer_usage = aggregate_usage(model_costs)
+    reflection_usage = aggregate_usage(reflection_costs)
+    usage = aggregate_usage([*model_costs, *reflection_costs])
     row.update(
         {
             "seconds": round(time.monotonic() - started, 3),

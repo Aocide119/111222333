@@ -128,7 +128,7 @@ def setup_campaign(tmp_path, monkeypatch):
         changed = changes[index] if index < len(changes) else False
         edit = Change(
             interface="Policy",
-            path="prompt/group.md",
+            path="prompt/system.md",
             content=f"Prompt revision {index}",
             finding_ids=["synthetic"],
             rationale="general policy",

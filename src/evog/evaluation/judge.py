@@ -9,6 +9,7 @@ from threading import Event
 
 from evog.core.errors import DeadlineExceeded, ProviderError
 from evog.core.providers import Provider, complete_before
+from evog.core.usage import aggregate_usage
 from evog.evaluation.data import Episode
 
 
@@ -139,8 +140,7 @@ def score(
         usage_calls.append(reply.usage)
         response_models.append(reply.response_model)
         http_attempts += reply.http_attempts
-        for key, value in reply.usage.items():
-            usage[key] = usage.get(key, 0) + value
+        usage = aggregate_usage(usage_calls)
         if cancel_event is not None and cancel_event.is_set():
             return {
                 "passed": None,

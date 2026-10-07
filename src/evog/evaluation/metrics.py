@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from evog.core.errors import ContractError
+from evog.core.usage import token_components, token_total
 
 SYSTEM_FAILURES = {
     "budget_exhausted",
@@ -14,15 +15,6 @@ SYSTEM_FAILURES = {
     "incident",
     "failed",
 }
-
-
-def token_total(usage: dict[str, int]) -> int | None:
-    # Cached prompt tokens are a subset of prompt_tokens, not an extra addend.
-    if "total_tokens" in usage:
-        return usage["total_tokens"]
-    if "prompt_tokens" in usage and "completion_tokens" in usage:
-        return usage["prompt_tokens"] + usage["completion_tokens"]
-    return None
 
 
 def research_metrics(results: list[dict], planned_ids: list[str]) -> dict[str, Any]:
@@ -62,17 +54,25 @@ def research_metrics(results: list[dict], planned_ids: list[str]) -> dict[str, A
         "completed_count": len(completed),
         "system_failure_count": len(failed),
         "tool_calls": measured([r.get("tool_calls") for r in completed]),
+        "token_accounting": "uncached_input + cached_input + output",
     }
     for stage in ("answer", "reflection", "judge"):
         efficiency[f"{stage}_seconds"] = measured([r.get(f"{stage}_seconds") for r in completed])
-        efficiency[f"{stage}_tokens"] = measured(
-            [
-                r[f"{stage}_tokens"]
-                if f"{stage}_tokens" in r
-                else token_total(r.get(f"{stage}_usage", {}))
-                for r in completed
-            ]
-        )
+        tokens = [
+            r[f"{stage}_tokens"]
+            if f"{stage}_tokens" in r
+            else token_total(r.get(f"{stage}_usage", {}))
+            for r in completed
+        ]
+        efficiency[f"{stage}_tokens"] = measured(tokens)
+        components = [
+            token_components(r.get(f"{stage}_usage", {}) if total is not None else {})
+            for r, total in zip(completed, tokens, strict=True)
+        ]
+        efficiency[f"{stage}_token_breakdown"] = {
+            key: measured([value[key] for value in components])
+            for key in ("uncached_input", "cached_input", "output")
+        }
     categories = {}
     for kind in sorted({r.get("question_type", "unknown") for r in rows.values()}):
         subset = [r for r in rows.values() if r.get("question_type", "unknown") == kind]

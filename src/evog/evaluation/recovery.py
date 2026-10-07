@@ -63,8 +63,11 @@ def rejudge_campaign(app: Application, output: Path, episodes: list[Episode]) ->
             # Prior failed attempts may have incurred unreported cost; do not invent it.
             row["judge_tokens"] = None
             row["judge_seconds"] = None
-            row["judge_recovery_returned_tokens"] = sum(
-                token_total(u) or 0 for u in judged.get("usage_calls", [])
+            returned_tokens = [token_total(u) for u in judged.get("usage_calls", [])]
+            row["judge_recovery_returned_tokens"] = (
+                sum(returned_tokens)
+                if all(value is not None for value in returned_tokens)
+                else None
             )
             if judged["passed"] is not None:
                 app.feedback(

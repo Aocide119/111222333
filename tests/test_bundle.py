@@ -33,14 +33,13 @@ def simple_bundle():
         "harness.toml": """format_version = 2
 name = "test"
 [components]
-prompt = ["prompt/system.md", "prompt/group.md"]
+prompt = ["prompt/system.md"]
 memory = "memory"
 tools = "tools"
 skills = "skills"
 middleware = "middleware"
 """,
         "prompt/system.md": "System instructions.",
-        "prompt/group.md": "Group instructions.\n",
         "memory/policy.md": "Notes require verified source references.\n",
         "memory/layout.toml": """version = 1
 [categories]
@@ -98,6 +97,8 @@ def test_packaged_baseline_has_five_components_and_exact_paper_prompt():
     harness = Harness(initial_files())
     assert harness.format_version == 2
     assert harness.system_prompt == prompt("group")
+    assert harness.prompt_paths == ["prompt/system.md"]
+    assert {path for path in harness.contents if path.startswith("prompt/")} == {"prompt/system.md"}
     assert {component_for(path) for path in harness.contents} == {
         "Harness",
         "Memory",
@@ -127,7 +128,7 @@ def test_materialize_is_complete_verified_and_idempotent(simple_bundle, tmp_path
     assert json.loads((destination / MANIFEST_NAME).read_text()) == bundle_manifest(harness)
     assert materialize_bundle(harness, destination) == destination
     changed = dict(simple_bundle)
-    changed["prompt/group.md"] += "A new instruction.\n"
+    changed["prompt/system.md"] += "A new instruction.\n"
     with pytest.raises(ContractError, match="overwrite"):
         materialize_bundle(Harness(changed), destination)
     assert verify_bundle(destination).id == harness.id
@@ -138,7 +139,7 @@ def test_export_revalidates_mutated_harness_and_leaves_no_partial_destination(
     simple_bundle, tmp_path
 ):
     harness = Harness(simple_bundle)
-    harness.contents["prompt/group.md"] += "A new instruction.\n"
+    harness.contents["prompt/system.md"] += "A new instruction.\n"
     with pytest.raises(ContractError, match="changed after validation"):
         materialize_bundle(harness, tmp_path / "checkpoint")
     assert not (tmp_path / "checkpoint").exists()
@@ -148,16 +149,16 @@ def test_export_revalidates_mutated_harness_and_leaves_no_partial_destination(
 def test_manifest_detects_all_component_tampering(simple_bundle, tmp_path, tamper):
     checkpoint = materialize_bundle(Harness(simple_bundle), tmp_path / "checkpoint")
     if tamper == "edit":
-        (checkpoint / "prompt/group.md").write_text("Edited instructions.\n")
+        (checkpoint / "prompt/system.md").write_text("Edited instructions.\n")
     elif tamper == "remove":
-        (checkpoint / "prompt/group.md").unlink()
+        (checkpoint / "prompt/system.md").unlink()
     elif tamper == "extra":
         (checkpoint / "prompt/extra.md").write_text("Unlisted instructions.\n")
     else:
         path = checkpoint / MANIFEST_NAME
         manifest = json.loads(path.read_text())
         if tamper == "wrong-size":
-            manifest["files"]["prompt/group.md"]["bytes"] += 1
+            manifest["files"]["prompt/system.md"]["bytes"] += 1
         else:
             manifest["manifest_version"] = True
         path.write_text(json.dumps(manifest))
@@ -180,9 +181,9 @@ def test_bundle_rejects_symlinks(simple_bundle, tmp_path, link):
         target = tmp_path / "link"
         target.symlink_to(checkpoint, target_is_directory=True)
     elif link == "file":
-        original = checkpoint / "prompt/group.md"
+        original = checkpoint / "prompt/system.md"
         original.unlink()
-        original.symlink_to(checkpoint / "prompt/system.md")
+        original.symlink_to(checkpoint / "memory/policy.md")
         target = checkpoint
     else:
         (checkpoint / "linked").symlink_to(checkpoint / "prompt", target_is_directory=True)
@@ -195,14 +196,14 @@ def test_bundle_rejects_symlinks(simple_bundle, tmp_path, link):
     "path",
     [
         "../prompt.md",
-        "/prompt/group.md",
-        "prompt//group.md",
-        "prompt/./group.md",
+        "/prompt/system.md",
+        "prompt//system.md",
+        "prompt/./system.md",
         "tools/implementations/../../escape.py",
         "tools/implementations\\escape.py",
         "skills/tool/scripts/run.py",
         "memory/template.py",
-        "prompt/group.py",
+        "prompt/system.py",
         ".DS_Store",
     ],
 )
@@ -324,14 +325,14 @@ def test_component_paths_identify_editable_component_boundaries():
     assert component_for("memory/policy.md") == "Memory"
     assert component_for("tools/implementations/search/rank.py") == "Tools"
     assert component_for("skills/search/SKILL.md") == "Skills"
-    assert component_for("prompt/group.md") == "Prompt"
+    assert component_for("prompt/system.md") == "Prompt"
     assert component_for("middleware/context_compaction.py") == "Middleware"
 
 
 @pytest.mark.parametrize("content", ["\x00binary", "\ud800invalid", "x" * 131073])
 def test_v2_rejects_nontext_and_oversize_files(simple_bundle, content):
     contents = dict(simple_bundle)
-    contents["prompt/group.md"] = content
+    contents["prompt/system.md"] = content
     with pytest.raises(ContractError):
         Harness(contents)
 
@@ -350,7 +351,7 @@ def test_loader_rejects_unknown_and_binary_files(simple_bundle, tmp_path):
     with pytest.raises(ContractError, match="outside revision"):
         load_bundle(checkpoint)
     extra.unlink()
-    (checkpoint / "prompt/group.md").write_bytes(b"\xff\xfe")
+    (checkpoint / "prompt/system.md").write_bytes(b"\xff\xfe")
     with pytest.raises(ContractError, match="text file"):
         load_bundle(checkpoint)
 

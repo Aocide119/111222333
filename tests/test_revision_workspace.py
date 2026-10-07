@@ -106,7 +106,7 @@ def test_export_import_loads_complete_bundle_and_tamper_is_detected(store, tmp_p
         with Application(tmp_path / "other", provider=DemoProvider()) as other:
             assert other.import_harness(exported) == app.store.harness().id
         root = app.store.checkpoint(app.store.harness())
-        altered = root / "prompt/group.md"
+        altered = root / "prompt/system.md"
         altered.chmod(0o600)
         altered.write_text("Changed after checkpoint publication")
         with pytest.raises(ContractError):
@@ -118,7 +118,7 @@ def test_stored_revision_payload_cannot_change_under_an_existing_id(store):
 
     original = store.harness()
     changed = dict(original.contents)
-    changed["prompt/group.md"] += "\nChanged after storage."
+    changed["prompt/system.md"] += "\nChanged after storage."
     with store.connect() as db:
         db.execute("UPDATE revisions SET files=? WHERE id=?", (json.dumps(changed), original.id))
     with pytest.raises(ContractError, match="fingerprint"):

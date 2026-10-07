@@ -122,7 +122,7 @@ def test_candidate_revalidates_interface_after_in_memory_mutation(store, setting
             '{"max_citations":4,"max_answer_chars":1000,"require_citations_for_partial":true}',
         ),
         (
-            "prompt/group.md",
+            "prompt/system.md",
             "Policy",
             "Use source records to verify current status and retain uncertainty.",
         ),
@@ -532,7 +532,7 @@ def test_auto_rollback_uses_best_activated_observation_when_best_candidate_is_st
         },
     )
     contents = dict(store.harness().contents)
-    contents["prompt/group.md"] += "\nConfirm ordering before summarizing."
+    contents["prompt/system.md"] += "\nConfirm ordering before summarizing."
     staged = Harness(contents)
     with store.connect() as db:
         db.execute(

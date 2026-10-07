@@ -30,10 +30,7 @@ def prompt(name: str) -> str:
     outside the evolvable five-component bundle.
     """
     if name == "group":
-        root = files("evog").joinpath("harness/base/prompt")
-        return "\n\n".join(
-            root.joinpath(part).read_text(encoding="utf-8") for part in ("system.md", "group.md")
-        )
+        return files("evog").joinpath("harness/base/prompt/system.md").read_text(encoding="utf-8")
     return files("evog").joinpath(f"agents/prompts/{name}.md").read_text(encoding="utf-8")
 
 
@@ -162,7 +159,6 @@ CONFIG_PATHS = {
 REQUIRED_FILES = {
     "harness.toml",
     "prompt/system.md",
-    "prompt/group.md",
     "memory/policy.md",
     "memory/layout.toml",
     "tools/registry.yaml",

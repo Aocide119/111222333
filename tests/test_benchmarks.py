@@ -770,7 +770,7 @@ def test_runner_resumes_after_regression_recovery_to_historical_best(
         parent = Harness(contents)
         app.store.activate(parent, base.id, "fixture-parent", "business")
         historical_contents = dict(contents)
-        historical_contents["prompt/group.md"] += "\nConfirm the current status before replying."
+        historical_contents["prompt/system.md"] += "\nConfirm the current status before replying."
         historical = Harness(historical_contents)
         app.store.activate(historical, parent.id, "fixture-best", "business")
         app.store.activate(parent, historical.id, "fixture-current", "business")

@@ -121,7 +121,7 @@ def test_reflection_failure_preserves_supported_answer(store, settings, empty_re
 
 def test_fixed_complete_citation_guard_survives_policy_changes(store):
     contents = store.harness().contents
-    contents["prompt/group.md"] = "Answer without evidence."
+    contents["prompt/system.md"] = "Answer without evidence."
     draft = AnswerDraft(text="unsupported", confidence=0.9, status="complete", citations=[])
     with pytest.raises(ContractError, match="source citations"):
         validate_answer(draft, Harness(contents), set())

@@ -2,7 +2,7 @@ format_version = 2
 name = "base"
 
 [components]
-prompt = ["prompt/system.md", "prompt/group.md"]
+prompt = ["prompt/system.md"]
 memory = "memory"
 tools = "tools"
 skills = "skills"

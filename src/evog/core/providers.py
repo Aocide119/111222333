@@ -13,6 +13,7 @@ from pydantic import Field
 from evog.core.config import Settings
 from evog.core.errors import DeadlineExceeded, ProviderError
 from evog.core.models import Record
+from evog.core.usage import normalize_usage
 
 
 class ToolCall(Record):
@@ -210,20 +211,7 @@ class ChatProvider:
                 ]
                 if len({call.id for call in calls}) != len(calls) or len(calls) > 16:
                     raise ValueError("Invalid tool call IDs or oversized call batch")
-                usage = {
-                    key: int(value)
-                    for key, value in (data.get("usage") or {}).items()
-                    if key in ("prompt_tokens", "completion_tokens", "total_tokens")
-                }
-                for detail_key, counter in (
-                    ("prompt_tokens_details", "cached_tokens"),
-                    ("completion_tokens_details", "reasoning_tokens"),
-                ):
-                    value = (data.get("usage") or {}).get(detail_key, {})
-                    if isinstance(value, dict) and type(value.get(counter)) is int:
-                        usage["cached_prompt_tokens" if counter == "cached_tokens" else counter] = (
-                            value[counter]
-                        )
+                usage = normalize_usage(data.get("usage"))
                 returned_model = data.get("model", "")
                 return ModelReply(
                     content=raw.get("content") or "",
